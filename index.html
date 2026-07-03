@@ -1100,13 +1100,23 @@ function openAddBatchSheet() {
   const today = formatDate(new Date());
   openSheet(
     '新增买入',
-    `<div class="form-group">
-      <label class="form-label">基金代码 *</label>
-      <input class="form-input" id="add-code" placeholder="如 110011" maxlength="6" inputmode="numeric">
+    `<div style="margin-bottom:16px;">
+      <button class="btn btn-ghost btn-full" onclick="triggerScanImage()" id="scan-btn">📷 扫描买入截图自动填写</button>
+      <input type="file" id="scan-input" accept="image/*" style="display:none" onchange="handleScanFile(this)">
+      <div id="scan-status" style="display:none;margin-top:8px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg3);font-size:12px;text-align:center;"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+      <span style="font-size:11px;color:var(--text3);">或手动填写</span>
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">基金代码（可选）</label>
+      <input class="form-input" id="add-code" placeholder="如 110011，无代码可留空" maxlength="6" inputmode="numeric">
     </div>
     <div class="form-group">
       <label class="form-label">基金名称（可选）</label>
-      <input class="form-input" id="add-name" placeholder="自动获取或手动填写">
+      <input class="form-input" id="add-name" placeholder="扫描截图后自动填写">
     </div>
     <div class="row">
       <div class="form-group">
@@ -1170,15 +1180,18 @@ function submitAddBatch() {
   const principal = parseFloat(document.getElementById('add-principal').value);
   const shares = parseFloat(document.getElementById('add-shares').value);
 
-  if (!code || !date || !nav || !principal || !shares) {
+  if (!date || !nav || !principal || !shares) {
     showToast('请填写所有必填项');
     return;
   }
 
-  if (!db.funds[code]) {
-    db.funds[code] = { fundCode: code, fundName: name || code, batches: [] };
-  } else if (name) {
-    db.funds[code].fundName = name;
+  // 用代码或名称作为 key，都没有时用时间戳
+  const fundKey = code || (name ? name.slice(0, 10) : 'fund_' + Date.now());
+  if (!db.funds[fundKey]) {
+    db.funds[fundKey] = { fundCode: code || '', fundName: name || fundKey, batches: [] };
+  } else {
+    if (code) db.funds[fundKey].fundCode = code;
+    if (name) db.funds[fundKey].fundName = name;
   }
 
   const batch = {
@@ -1193,7 +1206,7 @@ function submitAddBatch() {
     redemptionHistory: []
   };
 
-  db.funds[code].batches.push(batch);
+  db.funds[fundKey].batches.push(batch);
   saveDB();
   closeSheet();
   renderHoldings();
@@ -1867,6 +1880,134 @@ function scheduleAutoRefresh() {
     await refreshAll();
     scheduleAutoRefresh();
   }, delay);
+}
+
+// ════════════════════════════════════════════════════════════
+// OCR 截图识别
+// ════════════════════════════════════════════════════════════
+function triggerScanImage() {
+  document.getElementById('scan-input').click();
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = src; s.onload = resolve; s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function handleScanFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+
+  const statusEl = document.getElementById('scan-status');
+  const scanBtn = document.getElementById('scan-btn');
+  statusEl.style.display = 'block';
+  statusEl.style.color = 'var(--text2)';
+  scanBtn.disabled = true;
+
+  try {
+    if (!window.Tesseract) {
+      statusEl.textContent = '⏳ 加载识别引擎…';
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    }
+
+    statusEl.textContent = '⏳ 识别中，首次需下载语言包（约40MB），请稍候…';
+
+    const worker = await Tesseract.createWorker('chi_sim+eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          statusEl.textContent = `⏳ 识别中 ${Math.round(m.progress * 100)}%…`;
+        }
+      }
+    });
+
+    const { data: { text } } = await worker.recognize(file);
+    await worker.terminate();
+
+    const result = parseOCRText(text);
+    fillFromOCR(result);
+
+    if (result.found) {
+      statusEl.textContent = `✅ 已识别：${result.name || '未知基金'}，请核对下方信息后确认`;
+      statusEl.style.color = 'var(--green)';
+    } else {
+      statusEl.textContent = '⚠ 识别结果不完整，已填入部分内容，请手动补全';
+      statusEl.style.color = 'var(--orange)';
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ 识别失败，请手动填写';
+    statusEl.style.color = 'var(--red)';
+    console.error(e);
+  } finally {
+    scanBtn.disabled = false;
+  }
+}
+
+function parseOCRText(text) {
+  const result = { found: false };
+
+  // 基金名称
+  const nameMatch = text.match(/买入产品\s*([^\n\r>›»<]+)/);
+  if (nameMatch) {
+    result.name = nameMatch[1].trim().replace(/\s*[>›»]+\s*$/, '').trim();
+    if (result.name) result.found = true;
+  }
+
+  // 确认金额（优先）> 买入金额 > 顶部大金额
+  const confirmAmt = text.match(/确认金额\s*([\d,]+\.?\d*)/);
+  const buyAmt = text.match(/买入金额\s*([\d,]+\.?\d*)/);
+  const topAmt = text.match(/([\d,]+\.\d{2})\s*元[\s\S]{0,20}买入成功/);
+  if (confirmAmt) {
+    result.principal = parseFloat(confirmAmt[1].replace(/,/g, ''));
+    result.found = true;
+  } else if (buyAmt) {
+    result.principal = parseFloat(buyAmt[1].replace(/,/g, ''));
+  } else if (topAmt) {
+    result.principal = parseFloat(topAmt[1].replace(/,/g, ''));
+  }
+
+  // 确认份额
+  const sharesMatch = text.match(/确认份额\s*([\d,]+\.?\d*)/);
+  if (sharesMatch) {
+    result.shares = parseFloat(sharesMatch[1].replace(/,/g, ''));
+    result.found = true;
+  }
+
+  // 确认净值
+  const navMatch = text.match(/确认净值\s*([\d.]+)/);
+  if (navMatch) {
+    result.nav = parseFloat(navMatch[1]);
+    result.found = true;
+  }
+
+  // 日期：确认时间 > 买入时间
+  const confirmDate = text.match(/确认时间\s*(\d{4}-\d{2}-\d{2})/);
+  const buyDate = text.match(/买入时间\s*(\d{4}-\d{2}-\d{2})/);
+  if (confirmDate) {
+    result.date = confirmDate[1];
+    result.found = true;
+  } else if (buyDate) {
+    result.date = buyDate[1];
+  }
+
+  return result;
+}
+
+function fillFromOCR(result) {
+  const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+  set('add-name', result.name);
+  set('add-date', result.date);
+  set('add-nav', result.nav);
+  set('add-principal', result.principal);
+  set('add-shares', result.shares);
+  checkSharesMatch();
 }
 
 // ════════════════════════════════════════════════════════════
