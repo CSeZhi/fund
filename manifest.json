@@ -9,14 +9,16 @@
   "theme_color": "#1a1a2e",
   "icons": [
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%231a1a2e'/%3E%3Cpath d='M40 140 L40 80 L65 80 L65 140 Z' fill='%234ade80'/%3E%3Cpath d='M80 140 L80 60 L105 60 L105 140 Z' fill='%234ade80'/%3E%3Cpath d='M120 140 L120 95 L145 95 L145 140 Z' fill='%2360a5fa'/%3E%3Cline x1='30' y1='55' x2='155' y2='55' stroke='%23f87171' stroke-width='4' stroke-dasharray='8 4'/%3E%3C/svg%3E",
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='80' fill='%231a1a2e'/%3E%3Cpath d='M100 380 L100 200 L170 200 L170 380 Z' fill='%234ade80'/%3E%3Cpath d='M210 380 L210 150 L280 150 L280 380 Z' fill='%234ade80'/%3E%3Cpath d='M320 380 L320 240 L390 240 L390 380 Z' fill='%2360a5fa'/%3E%3Cline x1='80' y1='130' x2='420' y2='130' stroke='%23f87171' stroke-width='10' stroke-dasharray='20 10'/%3E%3C/svg%3E",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }
