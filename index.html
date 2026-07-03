@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1a1a2e">
+<title>止盈助手</title>
+<link rel="manifest" href="data:application/json,{%22name%22:%22止盈助手%22,%22short_name%22:%22止盈%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%231a1a2e%22,%22theme_color%22:%22%231a1a2e%22}">
+<style>
+:root {
+  --bg: #0f0f1a;
+  --bg2: #1a1a2e;
+  --bg3: #16213e;
+  --card: #1e1e3a;
+  --card2: #252545;
+  --border: #2d2d55;
+  --text: #e0e0f0;
+  --text2: #9090b0;
+  --text3: #5a5a80;
+  --green: #4ade80;
+  --green2: #166534;
+  --green3: #14532d;
+  --red: #f87171;
+  --red2: #991b1b;
+  --red3: #7f1d1d;
+  --orange: #fb923c;
+  --blue: #60a5fa;
+  --purple: #a78bfa;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif; font-size: 14px; min-height: 100vh; padding-bottom: 80px; }
+
+/* ── 顶部倒计时条 ── */
+#countdown-bar {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; min-height: 44px;
+}
+#countdown-label { font-size: 12px; color: var(--text2); }
+#countdown-value { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#countdown-next { font-size: 11px; color: var(--text3); }
+
+/* ── 预警横幅 ── */
+.alert-banner {
+  padding: 10px 16px; display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; display: none;
+}
+.alert-banner.weak { background: rgba(251,146,60,.15); border-bottom: 1px solid rgba(251,146,60,.3); color: var(--orange); }
+.alert-banner.strong { background: rgba(248,113,113,.15); border-bottom: 1px solid rgba(248,113,113,.4); color: var(--red); animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
+
+/* ── 止盈横幅 ── */
+#profit-banner {
+  padding: 12px 16px; background: rgba(74,222,128,.12);
+  border-bottom: 1px solid rgba(74,222,128,.3);
+  color: var(--green); font-size: 13px; font-weight: 600;
+  display: none; align-items: center; gap: 8px;
+}
+
+/* ── 导航标签 ── */
+#tab-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  display: flex;
+}
+.tab-btn {
+  flex: 1; padding: 10px 4px 8px; background: none; border: none;
+  color: var(--text3); cursor: pointer; display: flex; flex-direction: column;
+  align-items: center; gap: 3px; font-size: 10px; transition: color .2s;
+}
+.tab-btn.active { color: var(--blue); }
+.tab-btn svg { width: 22px; height: 22px; }
+
+/* ── 页面容器 ── */
+.page { display: none; padding: 16px; }
+.page.active { display: block; }
+
+/* ── 卡片 ── */
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 12px; overflow: hidden;
+}
+.card-header {
+  padding: 14px 16px; display: flex; align-items: center;
+  justify-content: space-between; cursor: pointer;
+}
+.card-body { padding: 12px 16px; border-top: 1px solid var(--border); }
+
+/* ── 标签/badge ── */
+.badge {
+  display: inline-flex; align-items: center; padding: 2px 8px;
+  border-radius: 20px; font-size: 11px; font-weight: 600;
+}
+.badge-holding { background: rgba(96,165,250,.15); color: var(--blue); }
+.badge-partial { background: rgba(251,146,60,.15); color: var(--orange); }
+.badge-sold { background: rgba(90,90,128,.15); color: var(--text3); }
+.badge-pending { background: rgba(167,139,250,.15); color: var(--purple); }
+.badge-confirmed { background: rgba(74,222,128,.12); color: var(--green); }
+.badge-trigger { background: rgba(74,222,128,.12); color: var(--green); }
+
+/* ── 数字颜色 ── */
+.profit { color: var(--green); }
+.loss { color: var(--red); }
+.neutral { color: var(--text); }
+.estimate { color: var(--text3); font-size: 11px; }
+
+/* ── 按钮 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: var(--radius-sm); border: none;
+  font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:active { background: #3b82f6; }
+.btn-success { background: var(--green2); color: var(--green); border: 1px solid var(--green2); }
+.btn-danger { background: var(--red2); color: var(--red); border: 1px solid var(--red2); }
+.btn-ghost { background: var(--card2); color: var(--text2); border: 1px solid var(--border); }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-full { width: 100%; }
+
+/* ── 表单 ── */
+.form-group { margin-bottom: 14px; }
+.form-label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.form-input {
+  width: 100%; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); padding: 10px 12px;
+  font-size: 14px; outline: none; transition: border-color .2s;
+}
+.form-input:focus { border-color: var(--blue); }
+.form-select {
+  width: 100%; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); padding: 10px 12px;
+  font-size: 14px; outline: none; appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%239090b0' viewBox='0 0 20 20'%3E%3Cpath d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 16px;
+}
+.form-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+/* ── 行布局 ── */
+.row { display: flex; gap: 10px; }
+.row > * { flex: 1; }
+.data-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; }
+.data-row + .data-row { border-top: 1px solid var(--border); }
+.data-key { font-size: 12px; color: var(--text2); }
+.data-val { font-size: 13px; font-weight: 600; }
+
+/* ── 底部滑出面板 ── */
+#overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200;
+  opacity: 0; pointer-events: none; transition: opacity .3s;
+}
+#overlay.show { opacity: 1; pointer-events: all; }
+#sheet {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 201;
+  background: var(--bg2); border-radius: 20px 20px 0 0;
+  padding: 0 0 env(safe-area-inset-bottom);
+  transform: translateY(100%); transition: transform .35s cubic-bezier(.32,.72,0,1);
+  max-height: 92vh; overflow-y: auto;
+}
+#sheet.show { transform: translateY(0); }
+.sheet-handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 12px auto 0; }
+.sheet-title { padding: 14px 20px 12px; font-size: 16px; font-weight: 700; border-bottom: 1px solid var(--border); }
+.sheet-body { padding: 16px 20px 20px; }
+.sheet-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; }
+
+/* ── 模态框 ── */
+#modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 300;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  opacity: 0; pointer-events: none; transition: opacity .2s;
+}
+#modal-overlay.show { opacity: 1; pointer-events: all; }
+.modal {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius);
+  width: 100%; max-width: 400px; overflow: hidden;
+  transform: scale(.95); transition: transform .2s;
+}
+#modal-overlay.show .modal { transform: scale(1); }
+.modal-header { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); font-size: 16px; font-weight: 700; }
+.modal-body { padding: 16px 20px; }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+
+/* ── 分割线标题 ── */
+.section-title { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .05em; margin: 20px 0 10px; padding-left: 4px; }
+
+/* ── 刷新按钮 ── */
+#refresh-btn {
+  position: fixed; right: 16px; bottom: 72px; z-index: 90;
+  width: 48px; height: 48px; border-radius: 50%;
+  background: var(--blue); border: none; color: #fff; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(96,165,250,.4);
+  transition: transform .2s, box-shadow .2s;
+}
+#refresh-btn:active { transform: scale(.9); }
+#refresh-btn.spinning svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── LocalStorage 占用 ── */
+#storage-bar { display: flex; align-items: center; gap: 8px; padding: 8px 0; margin-top: 8px; }
+#storage-track { flex: 1; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+#storage-fill { height: 100%; background: var(--blue); border-radius: 2px; transition: width .3s; }
+#storage-label { font-size: 11px; color: var(--text3); white-space: nowrap; }
+
+/* ── 止盈规则列表 ── */
+.rule-item {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+}
+.rule-item-info { flex: 1; }
+.rule-item-title { font-size: 13px; font-weight: 600; }
+.rule-item-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.rule-item-del { padding: 6px; background: none; border: none; color: var(--red); cursor: pointer; }
+
+/* ── 历史记录 ── */
+.redeem-item {
+  background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 14px; margin-bottom: 8px;
+}
+.redeem-item-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.redeem-item-title { font-size: 13px; font-weight: 600; }
+.redeem-item-date { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.redeem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.redeem-cell { font-size: 11px; }
+.redeem-cell-key { color: var(--text3); }
+.redeem-cell-val { font-weight: 600; margin-top: 1px; }
+
+/* ── 空状态 ── */
+.empty-state {
+  text-align: center; padding: 60px 20px; color: var(--text3);
+}
+.empty-state svg { width: 48px; height: 48px; margin-bottom: 12px; opacity: .4; }
+.empty-state p { font-size: 14px; }
+.empty-state small { font-size: 12px; margin-top: 4px; display: block; }
+
+/* ── 手动净值面板 ── */
+#manual-nav-modal { display: none; }
+
+/* ── 危险区域 ── */
+.danger-zone { border: 1px solid var(--red2); border-radius: var(--radius-sm); padding: 12px; margin-top: 8px; }
+
+/* ── 费率表 ── */
+.fee-row { display: grid; grid-template-columns: 1fr 1fr 40px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.fee-row input { min-width: 0; }
+
+/* ── toast ── */
+#toast {
+  position: fixed; top: 60px; left: 50%; transform: translateX(-50%);
+  background: rgba(30,30,58,.95); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 16px; font-size: 13px;
+  color: var(--text); z-index: 999; white-space: nowrap;
+  opacity: 0; transition: opacity .3s; pointer-events: none;
+}
+#toast.show { opacity: 1; }
+
+/* ── 折叠展开 ── */
+.collapse-body { overflow: hidden; }
+.chevron { transition: transform .25s; }
+.chevron.open { transform: rotate(180deg); }
+</style>
+</head>
+<body>
+
+<!-- 顶部倒计时 -->
+<div id="countdown-bar">
+  <div>
+    <div id="countdown-label">交易状态</div>
+    <div id="countdown-next"></div>
+  </div>
+  <div id="countdown-value">--:--:--</div>
+</div>
+
+<!-- 预警横幅 -->
+<div id="alert-weak" class="alert-banner weak">
+  <span>⚠</span><span id="alert-weak-text"></span>
+</div>
+<div id="alert-strong" class="alert-banner strong">
+  <span>🔴</span><span id="alert-strong-text"></span>
+</div>
+<div id="profit-banner">
+  <span>✅</span><span id="profit-banner-text"></span>
+</div>
+
+<!-- 刷新按钮 -->
+<button id="refresh-btn" onclick="refreshAll()" title="刷新净值">
+  <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+  </svg>
+</button>
+
+<!-- 页面：持仓 -->
+<div id="page-holdings" class="page active">
+  <div id="holdings-list"></div>
+</div>
+
+<!-- 页面：台账 -->
+<div id="page-ledger" class="page">
+  <div class="section-title">赎回记录</div>
+  <div id="ledger-fund-filter" style="margin-bottom:12px;"></div>
+  <div id="ledger-list"></div>
+</div>
+
+<!-- 页面：设置 -->
+<div id="page-settings" class="page">
+  <!-- 止盈规则 -->
+  <div class="section-title">止盈规则</div>
+  <div id="rules-list"></div>
+  <button class="btn btn-ghost btn-sm" onclick="openAddRuleSheet()">+ 添加档位</button>
+
+  <!-- 盘中预警 -->
+  <div class="section-title">盘中预警阈值</div>
+  <div class="card">
+    <div class="card-body">
+      <div class="row">
+        <div class="form-group">
+          <label class="form-label">弱预警（%）</label>
+          <input class="form-input" id="set-weak" type="number" step="0.1" min="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">强预警（%）</label>
+          <input class="form-input" id="set-strong" type="number" step="0.1" min="0">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 赎回费率 -->
+  <div class="section-title">赎回费率表</div>
+  <div id="fee-list"></div>
+  <button class="btn btn-ghost btn-sm" onclick="addFeeRow()">+ 添加费率段</button>
+
+  <!-- 法定节假日 -->
+  <div class="section-title">法定节假日</div>
+  <div class="card">
+    <div class="card-body">
+      <div class="form-group">
+        <label class="form-label">节假日（每行一个日期 YYYY-MM-DD）</label>
+        <textarea class="form-input" id="set-holidays" rows="6" style="resize:vertical;font-family:monospace;font-size:12px;"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary btn-full" onclick="saveSettings()" style="margin-top:4px;">保存设置</button>
+
+  <!-- 数据管理 -->
+  <div class="section-title">数据管理</div>
+  <div id="storage-bar">
+    <div id="storage-track"><div id="storage-fill" style="width:0%"></div></div>
+    <div id="storage-label">计算中…</div>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <button class="btn btn-ghost btn-sm" onclick="exportData()">导出 JSON</button>
+    <button class="btn btn-ghost btn-sm" onclick="importData()">导入 JSON</button>
+  </div>
+  <div class="danger-zone" style="margin-top:16px;">
+    <div style="font-size:12px;color:var(--red);font-weight:600;margin-bottom:8px;">⚠ 危险操作</div>
+    <button class="btn btn-danger btn-sm btn-full" onclick="resetToDefaults()">恢复默认设置</button>
+    <div style="height:8px;"></div>
+    <button class="btn btn-danger btn-sm btn-full" onclick="clearAllData()">清空所有数据</button>
+  </div>
+
+  <div style="margin-top:24px;text-align:center;font-size:11px;color:var(--text3);line-height:1.8;">
+    <div>止盈助手 v1.0</div>
+    <div>数据仅存储在本机浏览器，不上传任何服务器</div>
+    <div style="margin-top:4px;color:var(--text3);">所有计算仅为辅助工具，不构成投资建议</div>
+  </div>
+</div>
+
+<!-- 底部导航 -->
+<nav id="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('holdings',this)">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+    持仓
+  </button>
+  <button class="tab-btn" onclick="switchTab('ledger',this)">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+    台账
+  </button>
+  <button class="tab-btn" onclick="openAddBatchSheet()">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+    买入
+  </button>
+  <button class="tab-btn" onclick="switchTab('settings',this)">
+    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>
+    设置
+  </button>
+</nav>
+
+<!-- 遮罩 -->
+<div id="overlay" onclick="closeSheet()"></div>
+
+<!-- 底部滑出面板 -->
+<div id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-title" id="sheet-title">面板</div>
+  <div class="sheet-body" id="sheet-body"></div>
+  <div class="sheet-footer" id="sheet-footer"></div>
+</div>
+
+<!-- 模态框 -->
+<div id="modal-overlay">
+  <div class="modal">
+    <div class="modal-header" id="modal-header"></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+// 常量 & 默认值
+// ════════════════════════════════════════════════════════════
+const STORAGE_KEY = 'fundStopProfit_v3';
+const STORAGE_LIMIT = 5 * 1024 * 1024;
+
+const DEFAULT_DATA = {
+  version: 3,
+  settings: {
+    stopProfitRules: [
+      { threshold: 25, action: 'sell', sellRatio: 50, label: '第一档' },
+      { threshold: 35, action: 'clear', sellRatio: 100, label: '第二档' }
+    ],
+    preAlerts: [
+      { threshold: 23, level: 'weak' },
+      { threshold: 33, level: 'strong' }
+    ],
+    marketCloseTime: '15:00',
+    feeSchedule: [
+      { minDays: 0,   maxDays: 6,   rate: 1.5 },
+      { minDays: 7,   maxDays: 29,  rate: 0.75 },
+      { minDays: 30,  maxDays: 364, rate: 0.5 },
+      { minDays: 365, maxDays: 729, rate: 0.25 },
+      { minDays: 730, maxDays: null, rate: 0 }
+    ],
+    holidays: [
+      '2025-01-01','2025-01-28','2025-01-29','2025-01-30',
+      '2025-01-31','2025-02-03','2025-02-04','2025-04-04',
+      '2025-05-01','2025-05-02','2025-05-05','2025-06-02',
+      '2025-10-01','2025-10-02','2025-10-03','2025-10-06',
+      '2025-10-07','2025-10-08','2026-01-01','2026-01-26',
+      '2026-01-27','2026-01-28','2026-01-29','2026-01-30',
+      '2026-02-02','2026-04-06','2026-05-01','2026-05-04',
+      '2026-05-05','2026-06-19','2026-10-01','2026-10-02',
+      '2026-10-05','2026-10-06','2026-10-07','2026-10-08'
+    ]
+  },
+  funds: {},
+  navCache: {},
+  snapshots: []
+};
+
+// ════════════════════════════════════════════════════════════
+// 数据层
+// ════════════════════════════════════════════════════════════
+let db = null;
+
+function loadDB() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      db = migrateDB(parsed);
+    } else {
+      db = JSON.parse(JSON.stringify(DEFAULT_DATA));
+    }
+  } catch(e) {
+    db = JSON.parse(JSON.stringify(DEFAULT_DATA));
+  }
+}
+
+function saveDB() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    updateStorageBar();
+  } catch(e) {
+    showToast('存储空间不足，请导出备份后清理数据');
+  }
+}
+
+function migrateDB(data) {
+  if (!data.version) data.version = 1;
+  if (!data.navCache) data.navCache = {};
+  if (!data.snapshots) data.snapshots = [];
+  if (!data.settings) data.settings = JSON.parse(JSON.stringify(DEFAULT_DATA.settings));
+  if (!data.settings.feeSchedule) data.settings.feeSchedule = DEFAULT_DATA.settings.feeSchedule;
+  if (!data.settings.holidays) data.settings.holidays = DEFAULT_DATA.settings.holidays;
+  if (!data.settings.preAlerts) data.settings.preAlerts = DEFAULT_DATA.settings.preAlerts;
+  if (!data.funds) data.funds = {};
+  data.version = 3;
+  return data;
+}
+
+// ════════════════════════════════════════════════════════════
+// 精度工具
+// ════════════════════════════════════════════════════════════
+const r4 = v => Math.round(v * 10000) / 10000;
+const r2 = v => Math.round(v * 100) / 100;
+const fmt2 = v => v == null ? '—' : Number(v).toFixed(2);
+const fmt4 = v => v == null ? '—' : Number(v).toFixed(4);
+const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + Number(v).toFixed(2) + '%';
+const fmtMoney = v => v == null ? '—' : '¥' + Number(v).toFixed(2);
+
+// ════════════════════════════════════════════════════════════
+// 核心计算
+// ════════════════════════════════════════════════════════════
+function calcBatchEffectiveCost(batch) {
+  const totalShares = batch.shares +
+    (batch.dividendReinvestments || []).reduce((s, d) => s + d.shares, 0);
+  if (totalShares <= 0) return 0;
+  return r4(batch.principal / totalShares);
+}
+
+function calcBatchCurrentShares(batch) {
+  let shares = batch.shares;
+  (batch.dividendReinvestments || []).forEach(d => { shares += d.shares; });
+  // 扣除已赎回份额
+  (batch.redemptionHistory || []).forEach(r => {
+    if (['confirmed_sold', 'pending'].includes(r.status)) {
+      shares -= r.shares;
+    }
+  });
+  return r4(Math.max(shares, 0));
+}
+
+function calcProfitRate(nav, costPrice) {
+  if (!costPrice || costPrice <= 0) return null;
+  return r4((nav - costPrice) / costPrice * 100);
+}
+
+function calcFeeRate(holdDays) {
+  const schedule = db.settings.feeSchedule;
+  for (const seg of schedule) {
+    const inRange = holdDays >= seg.minDays && (seg.maxDays === null || holdDays <= seg.maxDays);
+    if (inRange) return seg.rate;
+  }
+  return 0;
+}
+
+function calcHoldDays(buyDate) {
+  const buy = new Date(buyDate + 'T00:00:00');
+  const now = new Date();
+  return Math.floor((now - buy) / 86400000);
+}
+
+// ════════════════════════════════════════════════════════════
+// 交易日判断
+// ════════════════════════════════════════════════════════════
+function isWeekend(date) {
+  const d = date.getDay();
+  return d === 0 || d === 6;
+}
+
+function isHoliday(date) {
+  const str = formatDate(date);
+  return db.settings.holidays.includes(str);
+}
+
+function isTradingDay(date) {
+  return !isWeekend(date) && !isHoliday(date);
+}
+
+function formatDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function nextTradingDay(date) {
+  const d = new Date(date);
+  do {
+    d.setDate(d.getDate() + 1);
+  } while (!isTradingDay(d));
+  return d;
+}
+
+function prevTradingDay(date) {
+  const d = new Date(date);
+  do {
+    d.setDate(d.getDate() - 1);
+  } while (!isTradingDay(d));
+  return d;
+}
+
+function getMarketStatus() {
+  const now = new Date();
+  const todayStr = formatDate(now);
+  const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+  const totalSec = h * 3600 + m * 60 + s;
+  const openSec = 9 * 3600 + 30 * 60;
+  const closeSec = 15 * 3600;
+
+  if (!isTradingDay(now)) {
+    const next = nextTradingDay(now);
+    return { status: 'closed', isTrading: false, isToday: false, next, nowSec: totalSec };
+  }
+  if (totalSec < openSec) {
+    return { status: 'pre', isTrading: false, isToday: true, next: now, nowSec: totalSec };
+  }
+  if (totalSec < closeSec) {
+    const remaining = closeSec - totalSec;
+    return { status: 'open', isTrading: true, isToday: true, remaining, nowSec: totalSec };
+  }
+  const next = nextTradingDay(now);
+  return { status: 'after', isTrading: false, isToday: true, next, nowSec: totalSec };
+}
+
+function isPast15(submitTime) {
+  const d = new Date(submitTime);
+  return d.getHours() * 60 + d.getMinutes() >= 15 * 60;
+}
+
+// ════════════════════════════════════════════════════════════
+// 净值接口（JSONP，带 CORS 代理回退）
+// ════════════════════════════════════════════════════════════
+const pendingJsonp = {};
+let jsonpFailCount = 0;
+
+function fetchNav(code) {
+  return new Promise((resolve, reject) => {
+    const cbName = 'jsonpgz';
+    const timeout = setTimeout(() => {
+      jsonpFailCount++;
+      delete pendingJsonp[code];
+      reject(new Error('timeout'));
+    }, 6000);
+
+    // 挂上全局回调（JSONP 固定函数名）
+    window[cbName] = (data) => {
+      clearTimeout(timeout);
+      jsonpFailCount = 0;
+      delete pendingJsonp[code];
+      resolve(data);
+    };
+
+    // 尝试直连（http），file:// 协议不受混合内容限制
+    const script = document.createElement('script');
+    script.src = `http://fundgz.1234567.com.cn/js/${code}.js?v=${Date.now()}`;
+    script.onerror = () => {
+      clearTimeout(timeout);
+      delete script.onload;
+      // 尝试 CORS 代理
+      tryProxyFetch(code, resolve, reject);
+    };
+    pendingJsonp[code] = { script, timeout };
+    document.head.appendChild(script);
+    script.addEventListener('load', () => script.remove(), { once: true });
+    script.addEventListener('error', () => script.remove(), { once: true });
+  });
+}
+
+function tryProxyFetch(code, resolve, reject) {
+  // 使用公共 CORS 代理
+  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`http://fundgz.1234567.com.cn/js/${code}.js`)}`;
+  fetch(proxyUrl, { signal: AbortSignal.timeout(7000) })
+    .then(r => r.text())
+    .then(text => {
+      // 解析 jsonpgz({...}) 格式
+      const match = text.match(/jsonpgz\((\{[\s\S]+\})\)/);
+      if (match) {
+        resolve(JSON.parse(match[1]));
+      } else {
+        jsonpFailCount++;
+        reject(new Error('parse error'));
+      }
+    })
+    .catch(() => {
+      jsonpFailCount++;
+      reject(new Error('proxy failed'));
+    });
+}
+
+async function fetchNavWithCache(code) {
+  const cache = db.navCache[code];
+  const market = getMarketStatus();
+  const now = Date.now();
+
+  // 交易时间内 1 分钟缓存，否则 5 分钟
+  const ttl = market.isTrading ? 60000 : 300000;
+  if (cache && (now - (cache.fetchedAt || 0)) < ttl) {
+    return cache;
+  }
+
+  try {
+    const data = await fetchNav(code);
+    const nav = {
+      dwjz: data.dwjz,
+      gsz: data.gsz,
+      gztime: data.gztime,
+      jzrq: data.jzrq,
+      fetchedAt: now,
+      source: 'api'
+    };
+    db.navCache[code] = nav;
+    saveDB();
+    return nav;
+  } catch(e) {
+    return cache || null;
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// 止盈引擎
+// ════════════════════════════════════════════════════════════
+function checkStopProfit(batch, realRate) {
+  const rules = db.settings.stopProfitRules;
+  const sorted = [...rules].sort((a, b) => b.threshold - a.threshold);
+  for (let i = 0; i < sorted.length; i++) {
+    const ruleIdx = rules.indexOf(sorted[i]);
+    if ((batch.triggeredRules || []).includes(ruleIdx)) continue;
+    if (realRate >= sorted[i].threshold) {
+      return { rule: sorted[i], ruleIdx };
+    }
+  }
+  return null;
+}
+
+// ════════════════════════════════════════════════════════════
+// UI 工具
+// ════════════════════════════════════════════════════════════
+function showToast(msg, dur = 2500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), dur);
+}
+
+let sheetCloseCallback = null;
+
+function openSheet(title, bodyHTML, footerHTML, onClose) {
+  document.getElementById('sheet-title').innerHTML = title;
+  document.getElementById('sheet-body').innerHTML = bodyHTML;
+  document.getElementById('sheet-footer').innerHTML = footerHTML || '';
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('sheet').classList.add('show');
+  sheetCloseCallback = onClose || null;
+}
+
+function closeSheet() {
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('sheet').classList.remove('show');
+  if (sheetCloseCallback) { sheetCloseCallback(); sheetCloseCallback = null; }
+}
+
+function openModal(header, body, footer) {
+  document.getElementById('modal-header').innerHTML = header;
+  document.getElementById('modal-body').innerHTML = body;
+  document.getElementById('modal-footer').innerHTML = footer;
+  document.getElementById('modal-overlay').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('show');
+}
+
+function confirm(msg, onOk, onCancel) {
+  openModal(
+    '确认操作',
+    `<p style="font-size:14px;line-height:1.6;">${msg}</p>`,
+    `<button class="btn btn-ghost" onclick="closeModal();${onCancel ? '(' + onCancel + ')()' : ''}">取消</button>
+     <button class="btn btn-primary" onclick="closeModal();(${onOk})()">确认</button>`
+  );
+}
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+  btn.classList.add('active');
+  if (tab === 'ledger') renderLedger();
+  if (tab === 'settings') renderSettings();
+}
+
+// ════════════════════════════════════════════════════════════
+// 倒计时
+// ════════════════════════════════════════════════════════════
+function updateCountdown() {
+  const market = getMarketStatus();
+  const valEl = document.getElementById('countdown-value');
+  const labelEl = document.getElementById('countdown-label');
+  const nextEl = document.getElementById('countdown-next');
+
+  if (market.status === 'open') {
+    const r = market.remaining;
+    const hh = String(Math.floor(r / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((r % 3600) / 60)).padStart(2, '0');
+    const ss = String(r % 60).padStart(2, '0');
+    valEl.textContent = `${hh}:${mm}:${ss}`;
+    valEl.style.color = r < 1800 ? 'var(--orange)' : 'var(--green)';
+    labelEl.textContent = '距离收盘';
+    nextEl.textContent = '';
+  } else if (market.status === 'pre') {
+    const openSec = 9 * 3600 + 30 * 60;
+    const r = openSec - market.nowSec;
+    const hh = String(Math.floor(r / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((r % 3600) / 60)).padStart(2, '0');
+    const ss = String(r % 60).padStart(2, '0');
+    valEl.textContent = `${hh}:${mm}:${ss}`;
+    valEl.style.color = 'var(--blue)';
+    labelEl.textContent = '距离开盘';
+    nextEl.textContent = '';
+  } else {
+    valEl.textContent = '已收盘';
+    valEl.style.color = 'var(--text2)';
+    labelEl.textContent = isTradingDay(new Date()) ? '今日已收盘' : '休市中';
+    if (market.next) {
+      const y = market.next.getFullYear(), mo = market.next.getMonth()+1, d = market.next.getDate();
+      nextEl.textContent = `下一交易日：${mo}月${d}日`;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// 持仓渲染
+// ════════════════════════════════════════════════════════════
+async function renderHoldings() {
+  const list = document.getElementById('holdings-list');
+  const funds = db.funds;
+  const codes = Object.keys(funds);
+
+  if (codes.length === 0) {
+    list.innerHTML = `<div class="empty-state">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <p>暂无持仓</p>
+      <small>点击下方"买入"添加第一笔</small>
+    </div>`;
+    return;
+  }
+
+  let html = '';
+  const profitTriggers = [];
+
+  for (const code of codes) {
+    const fund = funds[code];
+    const cache = db.navCache[code];
+    const batches = fund.batches || [];
+
+    // 批量校准待确认记录
+    calibratePendingRedemptions(fund, cache);
+
+    let weakAlert = false, strongAlert = false;
+    const market = getMarketStatus();
+
+    html += `<div class="section-title">${fund.fundName || code} · ${code}</div>`;
+
+    for (const batch of batches) {
+      if (batch.status === 'fully_sold' || batch.status === 'confirmed_sold') continue;
+
+      const cost = calcBatchEffectiveCost(batch);
+      const currentShares = calcBatchCurrentShares(batch);
+      const holdDays = calcHoldDays(batch.buyDate);
+      const feeRate = calcFeeRate(holdDays);
+
+      let realRate = null, estimateRate = null;
+      if (cache) {
+        if (cache.dwjz) realRate = calcProfitRate(parseFloat(cache.dwjz), cost);
+        if (cache.gsz && market.isTrading) estimateRate = calcProfitRate(parseFloat(cache.gsz), cost);
+      }
+
+      // 止盈检查
+      if (realRate !== null) {
+        const trigger = checkStopProfit(batch, realRate);
+        if (trigger) {
+          profitTriggers.push({ fund: fund.fundName || code, batch, trigger, realRate });
+        }
+      }
+
+      // 预警检查
+      if (market.isTrading && estimateRate !== null) {
+        const alerts = db.settings.preAlerts;
+        const strong = alerts.find(a => a.level === 'strong');
+        const weak = alerts.find(a => a.level === 'weak');
+        if (strong && estimateRate >= strong.threshold) strongAlert = true;
+        else if (weak && estimateRate >= weak.threshold) weakAlert = true;
+      }
+
+      const realRateStr = realRate !== null ? fmtPct(realRate) : '—';
+      const estRateStr = estimateRate !== null ? fmtPct(estimateRate) : null;
+      const realClass = realRate > 0 ? 'profit' : realRate < 0 ? 'loss' : 'neutral';
+      const estClass = estimateRate > 0 ? 'profit' : estimateRate < 0 ? 'loss' : 'neutral';
+      const navStr = cache ? fmt4(cache.dwjz) : '—';
+      const gszStr = cache ? fmt4(cache.gsz) : '—';
+      const navTime = cache ? (cache.jzrq || '—') : '—';
+
+      // 估算到账金额（含费率扣除）
+      let estimatedAmount = null;
+      if (cache && cache.dwjz && currentShares > 0) {
+        const gross = currentShares * parseFloat(cache.dwjz);
+        estimatedAmount = gross * (1 - feeRate / 100);
+      }
+
+      const batchId = batch.id;
+      const collapseId = 'collapse_' + batchId;
+
+      html += `<div class="card" id="card_${batchId}">
+        <div class="card-header" onclick="toggleCollapse('${collapseId}')">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <span style="font-size:13px;font-weight:600;">${batch.buyDate}</span>
+              ${badgeHTML(batch.status)}
+            </div>
+            <div style="margin-top:6px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">
+              <span class="${realClass}" style="font-size:22px;font-weight:700;">${realRateStr}</span>
+              ${estRateStr ? `<span class="estimate ${estClass}">估${estRateStr} 仅供参考</span>` : ''}
+            </div>
+          </div>
+          <svg class="chevron" id="chev_${collapseId}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;flex-shrink:0;color:var(--text3)">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          </svg>
+        </div>
+        <div class="collapse-body" id="${collapseId}" style="display:none;">
+          <div class="card-body">
+            <div class="data-row"><span class="data-key">有效成本价</span><span class="data-val">${fmt4(cost)}</span></div>
+            <div class="data-row"><span class="data-key">昨日真实净值</span><span class="data-val">${navStr} <small style="color:var(--text3);font-weight:400;">(${navTime})</small></span></div>
+            ${cache && cache.gsz ? `<div class="data-row"><span class="data-key">盘中估值</span><span class="data-val estimate">${gszStr} <small>(仅供参考)</small></span></div>` : ''}
+            <div class="data-row"><span class="data-key">当前份额</span><span class="data-val">${r4(currentShares).toLocaleString()}</span></div>
+            <div class="data-row"><span class="data-key">本金</span><span class="data-val">${fmtMoney(batch.principal)}</span></div>
+            <div class="data-row"><span class="data-key">持有天数</span><span class="data-val">${holdDays} 天（费率 ${feeRate}%）</span></div>
+            ${estimatedAmount ? `<div class="data-row"><span class="data-key">预估到账（扣费后）</span><span class="data-val profit">${fmtMoney(estimatedAmount)}</span></div>` : ''}
+            ${batch.dividendReinvestments && batch.dividendReinvestments.length > 0 ? dividendHTML(batch.dividendReinvestments) : ''}
+            ${batch.redemptionHistory && batch.redemptionHistory.length > 0 ? redeemHistoryMiniHTML(batch.redemptionHistory) : ''}
+            <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-ghost btn-sm" onclick="openDividendSheet('${code}','${batchId}')">红利再投</button>
+              <button class="btn btn-success btn-sm" onclick="openRedeemSheet('${code}','${batchId}')">赎回</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteBatch('${code}','${batchId}')">删除</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }
+  }
+
+  list.innerHTML = html;
+
+  // 预警横幅
+  updateAlertBanners(profitTriggers);
+  updateProfitBanner(profitTriggers);
+  updateStorageBar();
+}
+
+function badgeHTML(status) {
+  const map = {
+    holding: ['badge-holding', '持有中'],
+    partial_sold: ['badge-partial', '部分止盈'],
+    fully_sold: ['badge-sold', '已清仓'],
+    pending_confirm: ['badge-pending', '待确认'],
+    confirmed_sold: ['badge-confirmed', '已确认']
+  };
+  const [cls, label] = map[status] || ['badge-holding', status];
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function dividendHTML(divs) {
+  let h = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);"><div style="font-size:11px;color:var(--text3);margin-bottom:6px;">红利再投记录</div>';
+  for (const d of divs) {
+    h += `<div style="font-size:11px;color:var(--text2);display:flex;justify-content:space-between;padding:3px 0;">
+      <span>${d.date}</span><span>${d.shares} 份 @ ${d.nav}</span><span style="color:var(--green)">+¥${fmt2(d.amount)}</span>
+    </div>`;
+  }
+  return h + '</div>';
+}
+
+function redeemHistoryMiniHTML(history) {
+  const pending = history.filter(r => r.status === 'pending');
+  if (pending.length === 0) return '';
+  let h = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);"><div style="font-size:11px;color:var(--text3);margin-bottom:6px;">待确认赎回</div>';
+  for (const r of pending) {
+    h += `<div style="font-size:11px;display:flex;justify-content:space-between;color:var(--purple);padding:3px 0;">
+      <span>${r.submitTime.slice(0,10)}</span><span>${r.shares} 份</span><span>${badgeHTML('pending_confirm')}</span>
+    </div>`;
+  }
+  return h + '</div>';
+}
+
+function toggleCollapse(id) {
+  const el = document.getElementById(id);
+  const chev = document.getElementById('chev_' + id);
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  chev.classList.toggle('open', !isOpen);
+}
+
+function updateAlertBanners(triggers) {
+  const market = getMarketStatus();
+  const weakEl = document.getElementById('alert-weak');
+  const strongEl = document.getElementById('alert-strong');
+
+  // 收盘后不显示预警
+  if (!market.isTrading) {
+    weakEl.style.display = 'none';
+    strongEl.style.display = 'none';
+    return;
+  }
+
+  let weakFunds = [], strongFunds = [];
+  const alerts = db.settings.preAlerts;
+  const strong = alerts.find(a => a.level === 'strong');
+  const weak = alerts.find(a => a.level === 'weak');
+
+  for (const code of Object.keys(db.funds)) {
+    const cache = db.navCache[code];
+    if (!cache || !cache.gsz) continue;
+    const fund = db.funds[code];
+    for (const batch of fund.batches || []) {
+      if (batch.status === 'fully_sold') continue;
+      const cost = calcBatchEffectiveCost(batch);
+      const estRate = calcProfitRate(parseFloat(cache.gsz), cost);
+      if (estRate === null) continue;
+      const name = fund.fundName || code;
+      if (strong && estRate >= strong.threshold) strongFunds.push(`${name} ${fmtPct(estRate)}`);
+      else if (weak && estRate >= weak.threshold) weakFunds.push(`${name} ${fmtPct(estRate)}`);
+    }
+  }
+
+  if (strongFunds.length > 0) {
+    const r = market.remaining;
+    const mm = Math.floor(r / 60), ss = r % 60;
+    document.getElementById('alert-strong-text').textContent =
+      `强预警：${strongFunds.join('、')} — 距15:00还有 ${mm}分${ss}秒，跨日赎回有回撤风险`;
+    strongEl.style.display = 'flex';
+    weakEl.style.display = 'none';
+  } else if (weakFunds.length > 0) {
+    document.getElementById('alert-weak-text').textContent =
+      `预警：${weakFunds.join('、')} — 建议15:00前考虑赎回锁定当日净值`;
+    weakEl.style.display = 'flex';
+    strongEl.style.display = 'none';
+  } else {
+    weakEl.style.display = 'none';
+    strongEl.style.display = 'none';
+  }
+}
+
+function updateProfitBanner(triggers) {
+  const el = document.getElementById('profit-banner');
+  if (triggers.length === 0) { el.style.display = 'none'; return; }
+  const names = triggers.map(t => `${t.fund}(${t.trigger.rule.label} ${fmtPct(t.realRate)})`);
+  document.getElementById('profit-banner-text').textContent =
+    `止盈提醒：${names.join('、')}`;
+  el.style.display = 'flex';
+}
+
+// ════════════════════════════════════════════════════════════
+// 待确认赎回校准
+// ════════════════════════════════════════════════════════════
+function calibratePendingRedemptions(fund, cache) {
+  if (!cache) return;
+  let changed = false;
+  for (const batch of fund.batches || []) {
+    for (const r of batch.redemptionHistory || []) {
+      if (r.status !== 'pending') continue;
+      // 判断结算日期
+      const settlementDateObj = r.submitPhase === 'before_15'
+        ? new Date(r.submitTime.slice(0,10) + 'T00:00:00')
+        : nextTradingDay(new Date(r.submitTime.slice(0,10) + 'T00:00:00'));
+      const settlementDateStr = formatDate(settlementDateObj);
+
+      if (cache.jzrq >= settlementDateStr && cache.dwjz) {
+        r.settlementNav = parseFloat(cache.dwjz);
+        r.settlementDate = cache.jzrq;
+        const cost = calcBatchEffectiveCost(batch);
+        r.finalProfitRate = r4((r.settlementNav - cost) / cost * 100);
+        const holdDays = calcHoldDays(batch.buyDate);
+        r.fee = r2(r.shares * r.settlementNav * calcFeeRate(holdDays) / 100);
+        r.status = 'confirmed';
+        changed = true;
+      }
+    }
+    // 更新批次状态
+    if (changed) updateBatchStatus(batch);
+  }
+  if (changed) saveDB();
+}
+
+function updateBatchStatus(batch) {
+  const totalOriginal = batch.shares + (batch.dividendReinvestments || []).reduce((s,d) => s+d.shares, 0);
+  const redeemedShares = (batch.redemptionHistory || []).reduce((s,r) => s + (['confirmed','pending'].includes(r.status) ? r.shares : 0), 0);
+  const remaining = totalOriginal - redeemedShares;
+  if (remaining <= 0.001) {
+    batch.status = 'fully_sold';
+  } else if (redeemedShares > 0) {
+    batch.status = 'partial_sold';
+  } else {
+    batch.status = 'holding';
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// 添加买入批次
+// ════════════════════════════════════════════════════════════
+function openAddBatchSheet() {
+  const today = formatDate(new Date());
+  openSheet(
+    '新增买入',
+    `<div class="form-group">
+      <label class="form-label">基金代码 *</label>
+      <input class="form-input" id="add-code" placeholder="如 110011" maxlength="6" inputmode="numeric">
+    </div>
+    <div class="form-group">
+      <label class="form-label">基金名称（可选）</label>
+      <input class="form-input" id="add-name" placeholder="自动获取或手动填写">
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="form-label">买入日期 *</label>
+        <input class="form-input" id="add-date" type="date" value="${today}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">确认净值 *</label>
+        <input class="form-input" id="add-nav" type="number" step="0.0001" placeholder="0.0000" inputmode="decimal">
+      </div>
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="form-label">本金（元）*</label>
+        <input class="form-input" id="add-principal" type="number" step="0.01" placeholder="10000" inputmode="decimal" oninput="calcShares()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">确认份额 *</label>
+        <input class="form-input" id="add-shares" type="number" step="0.01" placeholder="自动计算" inputmode="decimal" oninput="checkSharesMatch()">
+      </div>
+    </div>
+    <div id="shares-hint" class="form-hint"></div>`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-primary" style="flex:2" onclick="submitAddBatch()">确认买入</button>`
+  );
+}
+
+function calcShares() {
+  const nav = parseFloat(document.getElementById('add-nav')?.value);
+  const principal = parseFloat(document.getElementById('add-principal')?.value);
+  const sharesEl = document.getElementById('add-shares');
+  if (nav > 0 && principal > 0 && sharesEl) {
+    sharesEl.value = r4(principal / nav);
+  }
+}
+
+function checkSharesMatch() {
+  const nav = parseFloat(document.getElementById('add-nav')?.value);
+  const principal = parseFloat(document.getElementById('add-principal')?.value);
+  const shares = parseFloat(document.getElementById('add-shares')?.value);
+  const hint = document.getElementById('shares-hint');
+  if (!hint) return;
+  if (nav > 0 && principal > 0 && shares > 0) {
+    const expected = r4(principal / nav);
+    const diff = Math.abs(shares - expected) / expected * 100;
+    if (diff > 2) {
+      hint.textContent = `⚠ 份额与净值/本金不匹配（差异 ${diff.toFixed(1)}%），请核对`;
+      hint.style.color = 'var(--orange)';
+    } else {
+      hint.textContent = '✓ 份额核对正常';
+      hint.style.color = 'var(--green)';
+    }
+  }
+}
+
+function submitAddBatch() {
+  const code = document.getElementById('add-code').value.trim();
+  const name = document.getElementById('add-name').value.trim();
+  const date = document.getElementById('add-date').value;
+  const nav = parseFloat(document.getElementById('add-nav').value);
+  const principal = parseFloat(document.getElementById('add-principal').value);
+  const shares = parseFloat(document.getElementById('add-shares').value);
+
+  if (!code || !date || !nav || !principal || !shares) {
+    showToast('请填写所有必填项');
+    return;
+  }
+
+  if (!db.funds[code]) {
+    db.funds[code] = { fundCode: code, fundName: name || code, batches: [] };
+  } else if (name) {
+    db.funds[code].fundName = name;
+  }
+
+  const batch = {
+    id: 'batch_' + Date.now(),
+    buyDate: date,
+    confirmNav: nav,
+    principal,
+    shares,
+    status: 'holding',
+    triggeredRules: [],
+    dividendReinvestments: [],
+    redemptionHistory: []
+  };
+
+  db.funds[code].batches.push(batch);
+  saveDB();
+  closeSheet();
+  renderHoldings();
+  showToast('买入记录已添加');
+}
+
+// ════════════════════════════════════════════════════════════
+// 红利再投资
+// ════════════════════════════════════════════════════════════
+function openDividendSheet(code, batchId) {
+  const today = formatDate(new Date());
+  openSheet(
+    '录入红利再投资',
+    `<div class="form-group">
+      <label class="form-label">到账日期 *</label>
+      <input class="form-input" id="div-date" type="date" value="${today}">
+    </div>
+    <div class="row">
+      <div class="form-group">
+        <label class="form-label">再投净值 *</label>
+        <input class="form-input" id="div-nav" type="number" step="0.0001" inputmode="decimal">
+      </div>
+      <div class="form-group">
+        <label class="form-label">再投份额 *</label>
+        <input class="form-input" id="div-shares" type="number" step="0.01" inputmode="decimal">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">红利金额（元）</label>
+      <input class="form-input" id="div-amount" type="number" step="0.01" inputmode="decimal">
+    </div>
+    <div class="form-hint">录入后将合并入原批次，重算有效成本价</div>`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-primary" style="flex:2" onclick="submitDividend('${code}','${batchId}')">确认录入</button>`
+  );
+}
+
+function submitDividend(code, batchId) {
+  const date = document.getElementById('div-date').value;
+  const nav = parseFloat(document.getElementById('div-nav').value);
+  const shares = parseFloat(document.getElementById('div-shares').value);
+  const amount = parseFloat(document.getElementById('div-amount').value) || 0;
+
+  if (!date || !nav || !shares) { showToast('请填写必填项'); return; }
+
+  const batch = db.funds[code]?.batches?.find(b => b.id === batchId);
+  if (!batch) return;
+  if (!batch.dividendReinvestments) batch.dividendReinvestments = [];
+  batch.dividendReinvestments.push({ date, nav, shares, amount });
+  saveDB();
+  closeSheet();
+  renderHoldings();
+  showToast('红利再投已录入');
+}
+
+// ════════════════════════════════════════════════════════════
+// 赎回
+// ════════════════════════════════════════════════════════════
+function openRedeemSheet(code, batchId) {
+  const fund = db.funds[code];
+  const batch = fund?.batches?.find(b => b.id === batchId);
+  if (!batch) return;
+
+  const cache = db.navCache[code];
+  const cost = calcBatchEffectiveCost(batch);
+  const currentShares = calcBatchCurrentShares(batch);
+  const holdDays = calcHoldDays(batch.buyDate);
+  const feeRate = calcFeeRate(holdDays);
+  const market = getMarketStatus();
+  const now = new Date();
+  const nowPhase = market.status === 'open' && market.remaining > 0 ? 'before_15' : 'after_15';
+
+  // 止盈规则推荐份额
+  let suggestedShares = '';
+  let suggestNote = '';
+  if (cache && cache.dwjz) {
+    const realRate = calcProfitRate(parseFloat(cache.dwjz), cost);
+    if (realRate !== null) {
+      const trigger = checkStopProfit(batch, realRate);
+      if (trigger) {
+        const ratio = trigger.rule.sellRatio / 100;
+        suggestedShares = r4(currentShares * ratio);
+        suggestNote = `（止盈${trigger.rule.label}：建议卖出${trigger.rule.sellRatio}%）`;
+      }
+    }
+  }
+
+  const estNav = cache ? (cache.gsz || cache.dwjz) : null;
+  const estAmount = estNav ? r2(parseFloat(suggestedShares || currentShares) * parseFloat(estNav) * (1 - feeRate / 100)) : null;
+
+  openSheet(
+    '赎回操作',
+    `<div style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+        <span style="color:var(--text2)">当前份额</span><span>${r4(currentShares).toLocaleString()}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+        <span style="color:var(--text2)">有效成本价</span><span>${fmt4(cost)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span style="color:var(--text2)">持有${holdDays}天 · 赎回费率</span><span style="color:var(--orange)">${feeRate}%</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">赎回份额 * ${suggestNote}</label>
+      <input class="form-input" id="redeem-shares" type="number" step="0.01" value="${suggestedShares || ''}" placeholder="最多 ${r4(currentShares)}" inputmode="decimal" oninput="updateRedeemEstimate('${code}')">
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button class="btn btn-ghost btn-sm" onclick="setRedeemShares(${r4(currentShares * 0.5)})">50%</button>
+        <button class="btn btn-ghost btn-sm" onclick="setRedeemShares(${r4(currentShares)})">全部</button>
+        ${suggestedShares ? `<button class="btn btn-ghost btn-sm" onclick="setRedeemShares(${suggestedShares})">止盈建议</button>` : ''}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">提交时段 *</label>
+      <select class="form-select" id="redeem-phase" onchange="updatePhaseWarning('${code}','${batchId}')">
+        <option value="before_15" ${nowPhase === 'before_15' ? 'selected' : ''}>今日15:00前（T日成交，当日净值结算）</option>
+        <option value="after_15" ${nowPhase === 'after_15' ? 'selected' : ''}>今日15:00后 / 休市下单（T+1成交，次日净值结算）</option>
+      </select>
+    </div>
+
+    <div id="phase-warning"></div>
+    <div id="redeem-estimate" style="background:var(--bg3);border-radius:var(--radius-sm);padding:12px;font-size:13px;"></div>`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-success" style="flex:2" onclick="submitRedeem('${code}','${batchId}')">确认赎回</button>`
+  );
+
+  updateRedeemEstimate(code);
+  updatePhaseWarning(code, batchId);
+}
+
+function setRedeemShares(v) {
+  const el = document.getElementById('redeem-shares');
+  if (el) { el.value = v; el.dispatchEvent(new Event('input')); }
+}
+
+function updateRedeemEstimate(code) {
+  const cache = db.navCache[code];
+  const sharesEl = document.getElementById('redeem-shares');
+  const el = document.getElementById('redeem-estimate');
+  if (!sharesEl || !el || !cache) return;
+  const shares = parseFloat(sharesEl.value);
+  if (!shares || shares <= 0) { el.innerHTML = ''; return; }
+  const fund = db.funds[code];
+  const batch = fund?.batches?.[0]; // just for fee
+  const holdDays = batch ? calcHoldDays(batch.buyDate) : 0;
+  const feeRate = calcFeeRate(holdDays);
+  const nav = parseFloat(cache.dwjz || 0);
+  const gross = shares * nav;
+  const fee = r2(gross * feeRate / 100);
+  const net = r2(gross - fee);
+  el.innerHTML = `<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="color:var(--text2)">赎回金额（毛）</span><span>${fmtMoney(gross)}</span></div>
+    <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="color:var(--text2)">赎回费（${feeRate}%）</span><span style="color:var(--red)">-${fmtMoney(fee)}</span></div>
+    <div style="display:flex;justify-content:space-between;font-weight:700;"><span>预计到账</span><span class="profit">${fmtMoney(net)}</span></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">以昨日净值估算，最终以结算净值为准</div>`;
+}
+
+function updatePhaseWarning(code, batchId) {
+  const el = document.getElementById('phase-warning');
+  const phaseEl = document.getElementById('redeem-phase');
+  if (!el || !phaseEl) return;
+  const phase = phaseEl.value;
+  const cache = db.navCache[code];
+  const market = getMarketStatus();
+
+  if (phase === 'after_15') {
+    let estRateStr = '';
+    if (cache && cache.gsz && market.isTrading) {
+      const fund = db.funds[code];
+      const batch = fund?.batches?.find(b => b.id === batchId);
+      if (batch) {
+        const cost = calcBatchEffectiveCost(batch);
+        const estRate = calcProfitRate(parseFloat(cache.gsz), cost);
+        if (estRate !== null) estRateStr = `当前盘中估算收益为 ${fmtPct(estRate)}，`;
+      }
+    }
+    el.innerHTML = `<div style="background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--red);">
+      ⚠ 跨日赎回风险：${estRateStr}选择15:00后提交，实际以次日净值结算，存在收益回落风险。
+    </div>`;
+  } else {
+    el.innerHTML = `<div style="background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.2);border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--green);">
+      ✓ T日成交：当晚净值更新后自动结算，结算后可查看最终收益。
+    </div>`;
+  }
+}
+
+function submitRedeem(code, batchId) {
+  const sharesEl = document.getElementById('redeem-shares');
+  const phaseEl = document.getElementById('redeem-phase');
+  if (!sharesEl || !phaseEl) return;
+
+  const shares = parseFloat(sharesEl.value);
+  const phase = phaseEl.value;
+  const fund = db.funds[code];
+  const batch = fund?.batches?.find(b => b.id === batchId);
+  if (!batch) return;
+
+  const currentShares = calcBatchCurrentShares(batch);
+  if (!shares || shares <= 0) { showToast('请输入赎回份额'); return; }
+  if (shares > currentShares + 0.01) { showToast(`份额不足，当前可赎回 ${r4(currentShares)}`); return; }
+
+  const cache = db.navCache[code];
+  const cost = calcBatchEffectiveCost(batch);
+  const estNav = cache ? parseFloat(cache.gsz || cache.dwjz) : null;
+  const estRate = estNav ? calcProfitRate(estNav, cost) : null;
+
+  // 检查是否触发了止盈规则
+  let triggerRuleIndex = null;
+  if (cache && cache.dwjz) {
+    const realRate = calcProfitRate(parseFloat(cache.dwjz), cost);
+    const trigger = checkStopProfit(batch, realRate);
+    if (trigger) triggerRuleIndex = trigger.ruleIdx;
+  }
+
+  const now = new Date();
+  const record = {
+    id: 'redeem_' + Date.now(),
+    submitTime: now.toISOString(),
+    submitPhase: phase,
+    shares: r4(shares),
+    sellRatio: r2(shares / currentShares * 100),
+    triggerRuleIndex,
+    estimatedNav: estNav,
+    estimatedProfitRate: estRate,
+    settlementNav: null,
+    settlementDate: null,
+    finalProfitRate: null,
+    fee: null,
+    status: 'pending'
+  };
+
+  if (!batch.redemptionHistory) batch.redemptionHistory = [];
+  batch.redemptionHistory.push(record);
+
+  // 标记止盈规则已触发
+  if (triggerRuleIndex !== null) {
+    if (!batch.triggeredRules) batch.triggeredRules = [];
+    if (!batch.triggeredRules.includes(triggerRuleIndex)) {
+      batch.triggeredRules.push(triggerRuleIndex);
+    }
+  }
+
+  updateBatchStatus(batch);
+  saveDB();
+  closeSheet();
+  renderHoldings();
+  showToast('赎回记录已生成，等待净值确认');
+}
+
+// ════════════════════════════════════════════════════════════
+// 删除批次
+// ════════════════════════════════════════════════════════════
+function deleteBatch(code, batchId) {
+  confirm('确定删除该批次？此操作不可恢复。', function() {
+    const fund = db.funds[code];
+    if (!fund) return;
+    fund.batches = fund.batches.filter(b => b.id !== batchId);
+    if (fund.batches.length === 0) delete db.funds[code];
+    saveDB();
+    renderHoldings();
+    showToast('批次已删除');
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+// 刷新净值
+// ════════════════════════════════════════════════════════════
+let refreshing = false;
+async function refreshAll() {
+  if (refreshing) return;
+  refreshing = true;
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+
+  const codes = Object.keys(db.funds);
+  if (codes.length === 0) { refreshing = false; btn.classList.remove('spinning'); showToast('暂无持仓基金'); return; }
+
+  let failCount = 0;
+  for (const code of codes) {
+    const result = await fetchNavWithCache(code);
+    if (!result || result.source !== 'api') failCount++;
+  }
+
+  if (failCount === codes.length) {
+    showToast('净值接口不可用，请手动录入');
+    openManualNavSheet();
+  } else if (failCount > 0) {
+    showToast(`${failCount} 个基金净值获取失败，其余已更新`);
+  } else {
+    showToast('净值已更新');
+  }
+
+  // 记录快照
+  recordSnapshots();
+
+  refreshing = false;
+  btn.classList.remove('spinning');
+  renderHoldings();
+}
+
+function recordSnapshots() {
+  const today = formatDate(new Date());
+  for (const code of Object.keys(db.funds)) {
+    const cache = db.navCache[code];
+    if (!cache || !cache.dwjz) continue;
+    for (const batch of db.funds[code].batches || []) {
+      if (batch.status === 'fully_sold') continue;
+      const cost = calcBatchEffectiveCost(batch);
+      const rate = calcProfitRate(parseFloat(cache.dwjz), cost);
+      if (rate === null) continue;
+      const exists = db.snapshots.find(s => s.date === today && s.fundCode === code && s.batchId === batch.id);
+      if (!exists) {
+        db.snapshots.push({ date: today, fundCode: code, batchId: batch.id, profitRate: rate });
+        // 只保留最近180条
+        if (db.snapshots.length > 1000) db.snapshots = db.snapshots.slice(-1000);
+      }
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// 手动录入净值
+// ════════════════════════════════════════════════════════════
+function openManualNavSheet() {
+  const codes = Object.keys(db.funds);
+  let fields = codes.map(code => {
+    const cache = db.navCache[code];
+    const name = db.funds[code].fundName || code;
+    return `<div class="form-group">
+      <label class="form-label">${name} (${code}) — 净值</label>
+      <div class="row">
+        <div><input class="form-input" id="mnav-dwjz-${code}" placeholder="真实净值 dwjz" type="number" step="0.0001" value="${cache?.dwjz || ''}" inputmode="decimal"></div>
+        <div><input class="form-input" id="mnav-gsz-${code}" placeholder="估值 gsz（可选）" type="number" step="0.0001" inputmode="decimal"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const today = formatDate(new Date());
+  openSheet(
+    '手动录入净值',
+    `<div style="font-size:12px;color:var(--orange);margin-bottom:12px;">⚠ 接口不可用，请手动填写（数据来源：天天基金 App 或官网）</div>
+    <div class="form-group">
+      <label class="form-label">净值日期</label>
+      <input class="form-input" id="mnav-date" type="date" value="${today}">
+    </div>
+    ${fields}`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-primary" style="flex:2" onclick="submitManualNav()">确认录入</button>`
+  );
+}
+
+function submitManualNav() {
+  const date = document.getElementById('mnav-date')?.value;
+  const codes = Object.keys(db.funds);
+  for (const code of codes) {
+    const dwjz = document.getElementById(`mnav-dwjz-${code}`)?.value;
+    const gsz = document.getElementById(`mnav-gsz-${code}`)?.value;
+    if (dwjz) {
+      db.navCache[code] = {
+        dwjz,
+        gsz: gsz || dwjz,
+        jzrq: date,
+        gztime: '',
+        fetchedAt: Date.now(),
+        source: 'manual'
+      };
+    }
+  }
+  saveDB();
+  closeSheet();
+  renderHoldings();
+  showToast('净值已手动录入');
+}
+
+// ════════════════════════════════════════════════════════════
+// 台账
+// ════════════════════════════════════════════════════════════
+let ledgerFilterCode = null;
+
+function renderLedger() {
+  const filterEl = document.getElementById('ledger-fund-filter');
+  const listEl = document.getElementById('ledger-list');
+
+  // 筛选按钮
+  const codes = Object.keys(db.funds);
+  let filterHtml = `<button class="btn btn-sm ${ledgerFilterCode === null ? 'btn-primary' : 'btn-ghost'}" onclick="setLedgerFilter(null)" style="margin-right:6px;margin-bottom:6px;">全部</button>`;
+  for (const code of codes) {
+    filterHtml += `<button class="btn btn-sm ${ledgerFilterCode === code ? 'btn-primary' : 'btn-ghost'}" onclick="setLedgerFilter('${code}')" style="margin-right:6px;margin-bottom:6px;">${db.funds[code].fundName || code}</button>`;
+  }
+  filterEl.innerHTML = filterHtml;
+
+  // 收集所有赎回记录
+  const records = [];
+  for (const code of codes) {
+    if (ledgerFilterCode && code !== ledgerFilterCode) continue;
+    const fund = db.funds[code];
+    for (const batch of fund.batches || []) {
+      for (const r of batch.redemptionHistory || []) {
+        records.push({ code, fund, batch, record: r });
+      }
+    }
+  }
+
+  records.sort((a, b) => new Date(b.record.submitTime) - new Date(a.record.submitTime));
+
+  if (records.length === 0) {
+    listEl.innerHTML = `<div class="empty-state"><svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg><p>暂无赎回记录</p></div>`;
+    return;
+  }
+
+  let html = '';
+  for (const { code, fund, batch, record: r } of records) {
+    const statusBadge = r.status === 'pending'
+      ? '<span class="badge badge-pending">待确认</span>'
+      : '<span class="badge badge-confirmed">已确认</span>';
+
+    const profitCell = r.status === 'confirmed' && r.finalProfitRate != null
+      ? `<span class="${r.finalProfitRate >= 0 ? 'profit' : 'loss'}">${fmtPct(r.finalProfitRate)}</span>`
+      : `<span style="color:var(--text3)">待确认（估 ${r.estimatedProfitRate != null ? fmtPct(r.estimatedProfitRate) : '—'}）</span>`;
+
+    html += `<div class="redeem-item">
+      <div class="redeem-item-header">
+        <div>
+          <div class="redeem-item-title">${fund.fundName || code} · ${batch.buyDate}批</div>
+          <div class="redeem-item-date">${r.submitTime.slice(0,16)} · ${r.submitPhase === 'before_15' ? 'T日成交' : 'T+1成交'}</div>
+        </div>
+        ${statusBadge}
+      </div>
+      <div class="redeem-grid">
+        <div class="redeem-cell"><div class="redeem-cell-key">赎回份额</div><div class="redeem-cell-val">${r.shares.toLocaleString()}</div></div>
+        <div class="redeem-cell"><div class="redeem-cell-key">触发档位</div><div class="redeem-cell-val">${r.triggerRuleIndex != null ? (db.settings.stopProfitRules[r.triggerRuleIndex]?.label || '—') : '手动'}</div></div>
+        <div class="redeem-cell"><div class="redeem-cell-key">结算净值</div><div class="redeem-cell-val">${r.status === 'confirmed' ? fmt4(r.settlementNav) : '—'}</div></div>
+        <div class="redeem-cell"><div class="redeem-cell-key">最终收益率</div><div class="redeem-cell-val">${profitCell}</div></div>
+        <div class="redeem-cell"><div class="redeem-cell-key">赎回费</div><div class="redeem-cell-val">${r.fee != null ? fmtMoney(r.fee) : '—'}</div></div>
+        <div class="redeem-cell"><div class="redeem-cell-key">结算日期</div><div class="redeem-cell-val">${r.settlementDate || '—'}</div></div>
+      </div>
+    </div>`;
+  }
+  listEl.innerHTML = html;
+}
+
+function setLedgerFilter(code) {
+  ledgerFilterCode = code;
+  renderLedger();
+}
+
+// ════════════════════════════════════════════════════════════
+// 设置
+// ════════════════════════════════════════════════════════════
+function renderSettings() {
+  // 止盈规则
+  const rulesList = document.getElementById('rules-list');
+  const rules = db.settings.stopProfitRules;
+  rulesList.innerHTML = rules.map((r, i) => `
+    <div class="rule-item">
+      <div class="rule-item-info">
+        <div class="rule-item-title">${r.label} — ≥${r.threshold}%</div>
+        <div class="rule-item-sub">${r.action === 'clear' ? '全部清仓' : `卖出 ${r.sellRatio}%`}</div>
+      </div>
+      <button class="rule-item-del" onclick="deleteRule(${i})">✕</button>
+    </div>`).join('');
+
+  // 预警阈值
+  const weak = db.settings.preAlerts.find(a => a.level === 'weak');
+  const strong = db.settings.preAlerts.find(a => a.level === 'strong');
+  document.getElementById('set-weak').value = weak?.threshold ?? 23;
+  document.getElementById('set-strong').value = strong?.threshold ?? 33;
+
+  // 费率表
+  renderFeeList();
+
+  // 节假日
+  document.getElementById('set-holidays').value = db.settings.holidays.join('\n');
+}
+
+function renderFeeList() {
+  const feeList = document.getElementById('fee-list');
+  const fees = db.settings.feeSchedule;
+  feeList.innerHTML = `
+    <div class="fee-row" style="font-size:11px;color:var(--text2);margin-bottom:4px;">
+      <span>最少持有（天）</span><span>最多持有（天）</span><span></span>
+    </div>
+    ${fees.map((seg, i) => `
+    <div class="fee-row" id="fee-row-${i}">
+      <input class="form-input" type="number" value="${seg.minDays}" id="fee-min-${i}" min="0" inputmode="numeric">
+      <input class="form-input" type="number" value="${seg.maxDays ?? ''}" placeholder="无上限" id="fee-max-${i}" inputmode="numeric">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+        <input class="form-input" type="number" step="0.01" value="${seg.rate}" id="fee-rate-${i}" style="width:56px;font-size:12px;padding:6px;" inputmode="decimal">
+        <span style="font-size:9px;color:var(--text3)">%</span>
+      </div>
+    </div>`).join('')}`;
+}
+
+function addFeeRow() {
+  db.settings.feeSchedule.push({ minDays: 0, maxDays: null, rate: 0 });
+  renderFeeList();
+}
+
+function deleteRule(idx) {
+  db.settings.stopProfitRules.splice(idx, 1);
+  saveDB();
+  renderSettings();
+  showToast('规则已删除');
+}
+
+function openAddRuleSheet() {
+  openSheet(
+    '添加止盈档位',
+    `<div class="form-group">
+      <label class="form-label">档位名称</label>
+      <input class="form-input" id="rule-label" placeholder="如 第三档">
+    </div>
+    <div class="form-group">
+      <label class="form-label">收益率阈值（%）</label>
+      <input class="form-input" id="rule-threshold" type="number" step="0.1" inputmode="decimal">
+    </div>
+    <div class="form-group">
+      <label class="form-label">操作类型</label>
+      <select class="form-select" id="rule-action" onchange="toggleRuleRatio()">
+        <option value="sell">卖出指定比例</option>
+        <option value="clear">全部清仓</option>
+      </select>
+    </div>
+    <div class="form-group" id="rule-ratio-group">
+      <label class="form-label">卖出比例（%）</label>
+      <input class="form-input" id="rule-ratio" type="number" step="1" min="1" max="100" value="50" inputmode="numeric">
+    </div>`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-primary" style="flex:2" onclick="submitAddRule()">添加</button>`
+  );
+}
+
+function toggleRuleRatio() {
+  const el = document.getElementById('rule-ratio-group');
+  if (el) el.style.display = document.getElementById('rule-action')?.value === 'clear' ? 'none' : 'block';
+}
+
+function submitAddRule() {
+  const label = document.getElementById('rule-label')?.value || '自定义';
+  const threshold = parseFloat(document.getElementById('rule-threshold')?.value);
+  const action = document.getElementById('rule-action')?.value;
+  const ratio = action === 'clear' ? 100 : parseFloat(document.getElementById('rule-ratio')?.value);
+
+  if (!threshold || threshold <= 0) { showToast('请填写有效的阈值'); return; }
+  db.settings.stopProfitRules.push({ threshold, action, sellRatio: ratio, label });
+  db.settings.stopProfitRules.sort((a, b) => a.threshold - b.threshold);
+  saveDB();
+  closeSheet();
+  renderSettings();
+  showToast('止盈档位已添加');
+}
+
+function saveSettings() {
+  // 预警阈值
+  const weak = parseFloat(document.getElementById('set-weak')?.value);
+  const strong = parseFloat(document.getElementById('set-strong')?.value);
+  db.settings.preAlerts = [
+    { threshold: weak || 23, level: 'weak' },
+    { threshold: strong || 33, level: 'strong' }
+  ];
+
+  // 费率表
+  const fees = [];
+  db.settings.feeSchedule.forEach((_, i) => {
+    const min = parseInt(document.getElementById(`fee-min-${i}`)?.value) || 0;
+    const maxRaw = document.getElementById(`fee-max-${i}`)?.value;
+    const max = maxRaw === '' ? null : parseInt(maxRaw);
+    const rate = parseFloat(document.getElementById(`fee-rate-${i}`)?.value) || 0;
+    fees.push({ minDays: min, maxDays: max, rate });
+  });
+  db.settings.feeSchedule = fees;
+
+  // 节假日
+  const rawHolidays = document.getElementById('set-holidays')?.value || '';
+  db.settings.holidays = rawHolidays.split('\n').map(s => s.trim()).filter(s => /^\d{4}-\d{2}-\d{2}$/.test(s));
+
+  saveDB();
+  showToast('设置已保存');
+  renderHoldings();
+}
+
+// ════════════════════════════════════════════════════════════
+// 数据导入导出
+// ════════════════════════════════════════════════════════════
+function exportData() {
+  const json = JSON.stringify(db, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `止盈助手_${formatDate(new Date())}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('数据已导出');
+}
+
+function importData() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        confirm('导入数据将覆盖当前所有数据，确定继续吗？', function() {
+          db = migrateDB(parsed);
+          saveDB();
+          renderHoldings();
+          renderSettings();
+          showToast('数据导入成功');
+        });
+      } catch(e) {
+        showToast('JSON 文件格式错误');
+      }
+    };
+    reader.readAsText(file);
+  };
+  input.click();
+}
+
+function resetToDefaults() {
+  confirm('恢复默认设置将重置止盈规则、预警阈值和费率表，持仓数据不受影响。继续？', function() {
+    db.settings = JSON.parse(JSON.stringify(DEFAULT_DATA.settings));
+    saveDB();
+    renderSettings();
+    showToast('已恢复默认设置');
+  });
+}
+
+function clearAllData() {
+  confirm('⚠ 此操作将清除所有数据（持仓、赎回记录、设置），不可恢复！确定继续吗？', function() {
+    db = JSON.parse(JSON.stringify(DEFAULT_DATA));
+    saveDB();
+    renderHoldings();
+    renderSettings();
+    showToast('所有数据已清空');
+  });
+}
+
+function updateStorageBar() {
+  const raw = localStorage.getItem(STORAGE_KEY) || '';
+  const bytes = new Blob([raw]).size;
+  const pct = (bytes / STORAGE_LIMIT * 100).toFixed(1);
+  const fill = document.getElementById('storage-fill');
+  const label = document.getElementById('storage-label');
+  if (fill) fill.style.width = Math.min(pct, 100) + '%';
+  if (label) label.textContent = `${(bytes/1024).toFixed(1)} KB / 5 MB (${pct}%)`;
+}
+
+// ════════════════════════════════════════════════════════════
+// 自动刷新策略
+// ════════════════════════════════════════════════════════════
+let autoRefreshTimer = null;
+
+function scheduleAutoRefresh() {
+  clearTimeout(autoRefreshTimer);
+  const market = getMarketStatus();
+  let delay;
+  if (market.isTrading) {
+    delay = 60000; // 盘中 1 分钟
+  } else if (market.status === 'after') {
+    delay = 300000; // 收盘后等净值，5 分钟
+  } else {
+    delay = 600000; // 休市，10 分钟
+  }
+  autoRefreshTimer = setTimeout(async () => {
+    await refreshAll();
+    scheduleAutoRefresh();
+  }, delay);
+}
+
+// ════════════════════════════════════════════════════════════
+// 初始化
+// ════════════════════════════════════════════════════════════
+(function init() {
+  loadDB();
+  renderHoldings();
+  updateCountdown();
+  setInterval(updateCountdown, 1000);
+  scheduleAutoRefresh();
+})();
+</script>
+</body>
+</html>
