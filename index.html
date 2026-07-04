@@ -2351,8 +2351,8 @@ async function startBatchImport(files) {
         <div style="height:100%;background:var(--blue);width:${pct}%;transition:width .3s;"></div>
       </div>`;
     try {
-      const { data: { text } } = await worker.recognize(files[i]);
-      const result = parseOCRText(text);
+      const { data } = await worker.recognize(files[i]);
+      const result = parseOCRData(data);
       _batchItems.push({ status: result.found ? 'ok' : 'partial', data: result, include: result.found });
     } catch {
       _batchItems.push({ status: 'error', data: {}, include: false });
@@ -2588,9 +2588,9 @@ async function tryAutoOCR() {
 
     clearTimeout(stuckTimer);
     if (cancelled) { worker.terminate(); return; }
-    const { data: { text } } = await worker.recognize(file);
+    const { data } = await worker.recognize(file);
     await worker.terminate();
-    if (!cancelled) applyOCRResult(parseOCRText(text), statusEl, text);
+    if (!cancelled) applyOCRResult(parseOCRData(data), statusEl, data.text);
   } catch(e) {
     if (!cancelled) {
       statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--red);">❌ 识别失败</div>
@@ -2627,6 +2627,90 @@ function applyOCRResult(result, statusEl, rawText) {
   } else {
     statusEl.innerHTML = `<div style="font-size:11px;font-weight:600;color:var(--orange);">⚠ 识别不完整</div>${rawHtml}`;
   }
+}
+
+// 按坐标列分区解析 Tesseract data（含 words 坐标）
+// 左列(x < 42%宽)是标签，右列是值，按行 Y 坐标配对
+function parseOCRData(data) {
+  const words = data?.words;
+  if (!words?.length) return parseOCRText(data.text || '');
+
+  const imgW = data.words.reduce((m, w) => Math.max(m, w.bbox.x1), 0);
+  const splitX = imgW * 0.42;
+
+  // 把每个 word 按左/右分组，同时记录行号（用 bbox 中心 Y 聚类）
+  const rows = {};
+  for (const w of words) {
+    const cx = (w.bbox.x0 + w.bbox.x1) / 2;
+    const cy = Math.round((w.bbox.y0 + w.bbox.y1) / 2 / 18) * 18; // 18px 行高分桶
+    if (!rows[cy]) rows[cy] = { left: [], right: [] };
+    if (cx < splitX) rows[cy].left.push(w.text);
+    else rows[cy].right.push(w.text);
+  }
+
+  // 按行 Y 排序，拼出右列各行文字，同时建立标签→值的映射
+  const pairs = Object.entries(rows)
+    .sort((a, b) => +a[0] - +b[0])
+    .map(([, v]) => ({
+      label: v.left.join('').replace(/\s/g, ''),
+      value: v.right.join(' ').trim()
+    }));
+
+  // 右列所有文字直接拼一起，用来做基金名称的 fallback
+  const rightText = pairs.map(p => p.value).join('\n');
+
+  const result = { found: false };
+
+  // 按标签关键字取对应右列值
+  const get = (...keys) => {
+    for (const p of pairs) {
+      if (keys.some(k => p.label.includes(k))) return p.value;
+    }
+    return '';
+  };
+
+  // 基金名称：「买入产品」对应右列（可能跨多行，合并所有产品行的右列值）
+  const nameLines = [];
+  let inName = false;
+  for (const p of pairs) {
+    if (p.label.includes('买入产品')) { inName = true; if (p.value) nameLines.push(p.value); continue; }
+    if (inName) {
+      if (p.label.length > 0) break; // 遇到新标签就停
+      if (p.value) nameLines.push(p.value);
+    }
+  }
+  const rawName = nameLines.join('').replace(/[>›»<\s]/g, '');
+  if (rawName.length >= 2) { result.name = rawName; result.found = true; }
+
+  // 金额
+  const amtStr = get('确认金额', '买入金额').replace(/[^\d.]/g, '');
+  if (amtStr) { result.principal = parseFloat(amtStr); result.found = true; }
+  if (!result.principal) {
+    // fallback：右列中最先出现的 xxx.00 元
+    const m = rightText.match(/([\d,]+\.\d{2})\s*元/);
+    if (m) result.principal = parseFloat(m[1].replace(/,/g, ''));
+  }
+
+  // 份额
+  const sharesStr = get('确认份额').replace(/[^\d.]/g, '');
+  if (sharesStr) { result.shares = parseFloat(sharesStr); result.found = true; }
+  if (!result.shares) {
+    const m = rightText.match(/([\d,]+\.\d{2})\s*份/);
+    if (m) result.shares = parseFloat(m[1].replace(/,/g, ''));
+  }
+
+  // 净值
+  const navStr = get('确认净值').replace(/[^\d.]/g, '');
+  if (navStr) { result.nav = parseFloat(navStr); result.found = true; }
+
+  // 日期：确认时间优先
+  const dateStr = get('确认时间', '买入时间').match(/\d{4}-\d{2}-\d{2}/)?.[0]
+    || rightText.match(/\d{4}-\d{2}-\d{2}/)?.[0];
+  if (dateStr) { result.date = dateStr; result.found = true; }
+
+  // 全部没识别到就回退到文字模式
+  if (!result.found) return parseOCRText(data.text || '');
+  return result;
 }
 
 function parseOCRText(rawText) {
