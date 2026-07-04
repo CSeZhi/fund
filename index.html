@@ -1023,6 +1023,14 @@ function hideFundDetail() {
   renderHoldings();
 }
 
+function toggleFundDividend(code) {
+  const fund = db.funds[code];
+  if (!fund) return;
+  fund.hasDividend = fund.hasDividend === false ? true : false;
+  saveDB();
+  renderFundDetail(code);
+}
+
 function renderFundDetail(code) {
   const fund = db.funds[code];
   if (!fund) { hideFundDetail(); return; }
@@ -1117,7 +1125,7 @@ function renderFundDetail(code) {
         ${divHtml}
         ${redeemHtml}
         <div class="batch-actions">
-          <button class="btn btn-ghost btn-sm" onclick="openDividendSheet('${code}','${batch.id}')">红利再投</button>
+          ${fund.hasDividend !== false ? `<button class="btn btn-ghost btn-sm" onclick="openDividendSheet('${code}','${batch.id}')">红利再投</button>` : ''}
           <button class="btn btn-success btn-sm" onclick="openRedeemSheet('${code}','${batch.id}')">赎回</button>
           <button class="btn btn-danger btn-sm" onclick="deleteBatch('${code}','${batch.id}')">删除</button>
         </div>
@@ -1144,7 +1152,10 @@ function renderFundDetail(code) {
       </div>
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-size:12px;color:var(--text2);">${navInfo}</div>
-        <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="openAddBatchSheet({code:'${code}',name:'${fundName.replace(/'/g,'\\u0027')}' })">+ 买入</button>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;justify-content:flex-end;">
+          <button onclick="toggleFundDividend('${code}')" style="font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:${fund.hasDividend !== false ? 'var(--green)' : 'var(--text3)'};">${fund.hasDividend !== false ? '分红再投 ✓' : '无分红'}</button>
+          <button class="btn btn-primary btn-sm" onclick="openAddBatchSheet({code:'${code}',name:'${fundName.replace(/'/g,'\\u0027')}',hasDividend:${fund.hasDividend !== false}})">+ 买入</button>
+        </div>
       </div>
     </div>
     ${batchesHtml}`;
@@ -1292,6 +1303,13 @@ function openAddBatchSheet(prefill = {}) {
       <label class="form-label">基金名称（可选）</label>
       <input class="form-input" id="add-name" placeholder="从截图中填入基金名称" value="${prefill.name || ''}">
     </div>
+    <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:14px;">
+      <input type="checkbox" id="add-has-dividend" style="width:16px;height:16px;accent-color:var(--blue);flex-shrink:0;" ${prefill.hasDividend !== false ? 'checked' : ''}>
+      <div>
+        <div style="font-size:13px;font-weight:600;">支持分红再投资</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:1px;">混合/股票型基金可开启，货币基金通常无分红</div>
+      </div>
+    </label>
     <div class="row">
       <div class="form-group">
         <label class="form-label">确认日期（份额到账日）*</label>
@@ -1368,6 +1386,7 @@ function submitAddBatch() {
     if (code) db.funds[fundKey].fundCode = code;
     if (name) db.funds[fundKey].fundName = name;
   }
+  db.funds[fundKey].hasDividend = !!document.getElementById('add-has-dividend')?.checked;
 
   const batch = {
     id: 'batch_' + Date.now(),
