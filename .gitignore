@@ -1,0 +1,20 @@
+# Claude 本地配置
+.claude/
+
+# 一次性工具文件
+make-icons.html
+
+# 规划文档
+分批止盈系统计划书（初版）.txt
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python OCR 后端（开发时产生）
+server/__pycache__/
+server/*.pyc
+server/.env
+server/venv/
+server/.venv/
