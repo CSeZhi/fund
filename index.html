@@ -2165,17 +2165,51 @@ async function tryAutoOCR() {
   const btn = document.getElementById('ocr-try-btn');
   btn.disabled = true;
 
-  function setProgress(icon, label, pct, sub) {
+  let cancelled = false;
+  let lastPct = -1;
+  let lastMoveTime = Date.now();
+  let stuckTimer = null;
+
+  function setProgress(icon, label, pct, sub, showCancel) {
+    if (cancelled) return;
     statusEl.style.display = 'block';
-    statusEl.style.color = 'var(--text2)';
     const barHtml = pct != null
       ? `<div style="margin-top:6px;background:var(--border);border-radius:2px;height:4px;overflow:hidden;">
            <div style="height:100%;background:var(--blue);border-radius:2px;width:${pct}%;transition:width .3s;"></div>
          </div>`
       : '';
+    const cancelBtn = showCancel
+      ? `<button onclick="cancelOCR()" style="margin-top:8px;font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:3px 10px;color:var(--text2);cursor:pointer;">取消</button>`
+      : '';
     statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;">${icon} ${label}</div>
       ${sub ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${sub}</div>` : ''}
-      ${barHtml}`;
+      ${barHtml}${cancelBtn}`;
+  }
+
+  window._ocrCancel = () => {
+    cancelled = true;
+    clearTimeout(stuckTimer);
+    btn.disabled = false;
+    statusEl.innerHTML = `<div style="font-size:12px;color:var(--text2);">已取消，可对照图片手动填写</div>`;
+  };
+
+  function scheduleStuckCheck() {
+    stuckTimer = setTimeout(() => {
+      if (cancelled) return;
+      if (Date.now() - lastMoveTime > 20000) {
+        statusEl.innerHTML = `
+          <div style="font-size:12px;font-weight:600;color:var(--orange);">⚠ 下载卡住了</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6;">
+            CDN 连接不稳定。建议：<br>
+            ① 点"粘贴文字"，从天天基金 App 长按复制确认详情<br>
+            ② 或对照上方图片手动填写
+          </div>
+          <button onclick="cancelOCR()" style="margin-top:8px;font-size:12px;background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:6px 14px;color:var(--text);cursor:pointer;">确认取消</button>`;
+        btn.disabled = false;
+      } else {
+        scheduleStuckCheck();
+      }
+    }, 5000);
   }
 
   try {
@@ -2185,26 +2219,31 @@ async function tryAutoOCR() {
       const bitmap = await createImageBitmap(file);
       const items = await detector.detect(bitmap);
       bitmap.close();
-      applyOCRResult(parseOCRText(items.map(t => t.rawValue).join('\n')), statusEl);
+      if (!cancelled) applyOCRResult(parseOCRText(items.map(t => t.rawValue).join('\n')), statusEl);
       return;
     }
 
     if (!window.Tesseract) {
-      setProgress('⏳', '正在加载识别引擎…', null, '从 jsDelivr CDN 下载（国内有节点）');
+      setProgress('⏳', '正在加载识别引擎…', 0, '从 jsDelivr CDN 下载（国内有节点）', true);
+      scheduleStuckCheck();
       await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
 
-    setProgress('⏳', '准备中…', 0, '');
+    if (cancelled) return;
+    setProgress('⏳', '准备中…', 0, '', true);
+
     const worker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
       langPath: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
       logger: m => {
+        if (cancelled) return;
         const pct = Math.round((m.progress || 0) * 100);
+        if (pct !== lastPct) { lastPct = pct; lastMoveTime = Date.now(); }
         if (m.status === 'loading tesseract core') {
-          setProgress('⏳', `加载引擎核心 ${pct}%`, pct, '约 6MB，仅首次需要下载');
+          setProgress('⏳', `加载引擎核心 ${pct}%`, pct, '约 6MB，仅首次需要下载', true);
         } else if (m.status === 'loading language traineddata') {
-          setProgress('⬇', `下载中文语言包 ${pct}%`, pct, '约 8MB，仅首次，下载后自动缓存');
+          setProgress('⬇', `下载中文语言包 ${pct}%`, pct, '约 8MB，仅首次，下载后自动缓存', true);
         } else if (m.status === 'recognizing text') {
           setProgress('🔍', `识别中 ${pct}%`, pct, '');
         } else if (m.status === 'initialized api') {
@@ -2212,15 +2251,26 @@ async function tryAutoOCR() {
         }
       }
     });
+
+    clearTimeout(stuckTimer);
+    if (cancelled) { worker.terminate(); return; }
     const { data: { text } } = await worker.recognize(file);
     await worker.terminate();
-    applyOCRResult(parseOCRText(text), statusEl);
+    if (!cancelled) applyOCRResult(parseOCRText(text), statusEl);
   } catch(e) {
-    statusEl.innerHTML = '<div style="font-size:12px;color:var(--red);">❌ 自动识别失败，请对照图片手动填写</div>';
-    statusEl.style.display = 'block';
+    if (!cancelled) {
+      statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--red);">❌ 识别失败</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6;">可改用"粘贴文字"或手动填写</div>`;
+      statusEl.style.display = 'block';
+    }
   } finally {
-    btn.disabled = false;
+    clearTimeout(stuckTimer);
+    if (!cancelled) btn.disabled = false;
   }
+}
+
+function cancelOCR() {
+  if (window._ocrCancel) window._ocrCancel();
 }
 
 function applyOCRResult(result, statusEl) {
