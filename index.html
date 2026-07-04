@@ -1961,18 +1961,18 @@ async function handleScanFile(input) {
       await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
 
-    statusEl.textContent = '⏳ 识别中，首次需下载语言包（约40MB），请稍候…';
+    statusEl.textContent = '⏳ 准备识别引擎…';
 
-    const worker = await Tesseract.createWorker('chi_sim+eng', 1, {
+    const worker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-      langPath: 'https://tessdata.projectnaptha.com/4.0.0',
+      langPath: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
       logger: m => {
         const pct = Math.round((m.progress || 0) * 100);
         const msgs = {
           'loading tesseract core': `⏳ 加载引擎核心 ${pct}%…`,
           'initializing tesseract': '⏳ 初始化引擎…',
-          'loading language traineddata': `⬇ 下载语言包 ${pct}%（首次约40MB，请耐心等待）`,
+          'loading language traineddata': `⬇ 下载语言包 ${pct}%（首次约8MB）`,
           'initializing api with lang': '⏳ 语言包就绪，准备识别…',
           'recognizing text': `⏳ 识别中 ${pct}%…`,
         };
