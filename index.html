@@ -795,7 +795,7 @@ async function autoFillFundName(code) {
   if (name && !nameEl.value) nameEl.value = name;
 }
 
-
+async function fetchNavWithCache(code) {
   const cache = db.navCache[code];
   const market = getMarketStatus();
   const now = Date.now();
