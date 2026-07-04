@@ -695,66 +695,107 @@ function isPast15(submitTime) {
 }
 
 // ════════════════════════════════════════════════════════════
-// 净值接口（JSONP，带 CORS 代理回退）
+// 净值接口
+// 主路：HTTPS JSONP（fundgz.1234567.com.cn），解决混合内容问题
+// 兜底：东方财富移动 API（有 CORS，无需代理）
 // ════════════════════════════════════════════════════════════
 const pendingJsonp = {};
 let jsonpFailCount = 0;
 
+// 东方财富移动 API 固定参数
+const _EMBase = new URLSearchParams({
+  product: 'EFund',
+  deviceid: '874C427C-7C24-4980-A835-66FD40B67605',
+  plat: 'Iphone',
+  version: '6.5.5',
+});
+const _EMHeaders = { validmark: 'aKVEnBbJF9Nip2Wjf4de/fSvA8W3X3iB4L6vT0Y5cxvZbEfEm17udZKUD2qy37dLRY3bzzHLDv+up/Yn3OTo5Q==' };
+
+async function fetchNavFromMobileAPI(code) {
+  const params = new URLSearchParams(_EMBase);
+  params.set('FCODE', code);
+  params.set('pageIndex', '1');
+  params.set('pagesize', '1');
+  const resp = await fetch(
+    `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNHisNetList?${params}`,
+    { headers: _EMHeaders, signal: AbortSignal.timeout(8000) }
+  );
+  const data = await resp.json();
+  if (!data.Success || !data.Datas?.length) throw new Error('no data');
+  const d = data.Datas[0];
+  return {
+    fundcode: code,
+    dwjz: d.DWJZ,
+    gsz: d.DWJZ,
+    gszzl: d.JZZZL,
+    gztime: d.FSRQ + ' 00:00',
+    jzrq: d.FSRQ,
+  };
+}
+
 function fetchNav(code) {
   return new Promise((resolve, reject) => {
-    const cbName = 'jsonpgz';
+    let done = false;
+    const finish = (fn, val) => { if (done) return; done = true; fn(val); };
+
+    // 6 秒超时 → 转移动 API
     const timeout = setTimeout(() => {
-      jsonpFailCount++;
       delete pendingJsonp[code];
-      reject(new Error('timeout'));
+      fetchNavFromMobileAPI(code)
+        .then(v => finish(resolve, v))
+        .catch(e => { jsonpFailCount++; finish(reject, e); });
     }, 6000);
 
-    // 挂上全局回调（JSONP 固定函数名）
-    window[cbName] = (data) => {
+    window['jsonpgz'] = (data) => {
       clearTimeout(timeout);
       jsonpFailCount = 0;
       delete pendingJsonp[code];
-      resolve(data);
+      finish(resolve, data);
     };
 
-    // 尝试直连（http），file:// 协议不受混合内容限制
+    // 主路：HTTPS JSONP（原来是 http，改成 https 即可过混合内容检查）
     const script = document.createElement('script');
-    script.src = `http://fundgz.1234567.com.cn/js/${code}.js?v=${Date.now()}`;
+    script.src = `https://fundgz.1234567.com.cn/js/${code}.js?v=${Date.now()}`;
     script.onerror = () => {
       clearTimeout(timeout);
-      delete script.onload;
-      // 尝试 CORS 代理
-      tryProxyFetch(code, resolve, reject);
+      delete pendingJsonp[code];
+      // JSONP 脚本加载失败 → 直接走移动 API
+      fetchNavFromMobileAPI(code)
+        .then(v => finish(resolve, v))
+        .catch(e => { jsonpFailCount++; finish(reject, e); });
     };
     pendingJsonp[code] = { script, timeout };
     document.head.appendChild(script);
-    script.addEventListener('load', () => script.remove(), { once: true });
+    script.addEventListener('load',  () => script.remove(), { once: true });
     script.addEventListener('error', () => script.remove(), { once: true });
   });
 }
 
-function tryProxyFetch(code, resolve, reject) {
-  // 使用公共 CORS 代理
-  const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(`http://fundgz.1234567.com.cn/js/${code}.js`)}`;
-  fetch(proxyUrl, { signal: AbortSignal.timeout(7000) })
-    .then(r => r.text())
-    .then(text => {
-      // 解析 jsonpgz({...}) 格式
-      const match = text.match(/jsonpgz\((\{[\s\S]+\})\)/);
-      if (match) {
-        resolve(JSON.parse(match[1]));
-      } else {
-        jsonpFailCount++;
-        reject(new Error('parse error'));
-      }
-    })
-    .catch(() => {
-      jsonpFailCount++;
-      reject(new Error('proxy failed'));
-    });
+// 根据基金代码搜索基金名称（用于买入表单自动填充）
+async function searchFundName(code) {
+  if (!/^\d{6}$/.test(code)) return null;
+  try {
+    const params = new URLSearchParams(_EMBase);
+    params.set('m', '1');
+    params.set('key', code);
+    const resp = await fetch(
+      `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?${params}`,
+      { headers: _EMHeaders, signal: AbortSignal.timeout(5000) }
+    );
+    const data = await resp.json();
+    return data?.Datas?.[0]?.FundBaseInfo?.SHORTNAME || data?.Datas?.[0]?.NAME || null;
+  } catch { return null; }
 }
 
-async function fetchNavWithCache(code) {
+async function autoFillFundName(code) {
+  if (code.length !== 6) return;
+  const nameEl = document.getElementById('add-name');
+  if (!nameEl || nameEl.value) return; // 已有内容不覆盖
+  const name = await searchFundName(code);
+  if (name && !nameEl.value) nameEl.value = name;
+}
+
+
   const cache = db.navCache[code];
   const market = getMarketStatus();
   const now = Date.now();
@@ -1382,7 +1423,7 @@ function openAddBatchSheet(prefill = {}) {
     </div>
     <div class="form-group">
       <label class="form-label">基金代码（可选）</label>
-      <input class="form-input" id="add-code" placeholder="如 110011，无代码可留空" maxlength="6" inputmode="numeric" value="${prefill.code || ''}">
+      <input class="form-input" id="add-code" placeholder="如 110011，无代码可留空" maxlength="6" inputmode="numeric" value="${prefill.code || ''}" oninput="autoFillFundName(this.value)">
     </div>
     <div class="form-group">
       <label class="form-label">基金名称（可选）</label>
