@@ -2163,49 +2163,61 @@ async function tryAutoOCR() {
 
   const statusEl = document.getElementById('scan-status');
   const btn = document.getElementById('ocr-try-btn');
-  statusEl.style.display = 'block';
-  statusEl.style.color = 'var(--text2)';
   btn.disabled = true;
 
+  function setProgress(icon, label, pct, sub) {
+    statusEl.style.display = 'block';
+    statusEl.style.color = 'var(--text2)';
+    const barHtml = pct != null
+      ? `<div style="margin-top:6px;background:var(--border);border-radius:2px;height:4px;overflow:hidden;">
+           <div style="height:100%;background:var(--blue);border-radius:2px;width:${pct}%;transition:width .3s;"></div>
+         </div>`
+      : '';
+    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;">${icon} ${label}</div>
+      ${sub ? `<div style="font-size:11px;color:var(--text3);margin-top:2px;">${sub}</div>` : ''}
+      ${barHtml}`;
+  }
+
   try {
-    // 优先用浏览器内置 OCR
     if ('TextDetector' in window) {
-      statusEl.textContent = '⏳ 识别中…';
+      setProgress('⚡', '使用内置 OCR 识别中…', null, '无需下载，速度最快');
       const detector = new TextDetector();
       const bitmap = await createImageBitmap(file);
       const items = await detector.detect(bitmap);
       bitmap.close();
-      const text = items.map(t => t.rawValue).join('\n');
-      applyOCRResult(parseOCRText(text), statusEl);
+      applyOCRResult(parseOCRText(items.map(t => t.rawValue).join('\n')), statusEl);
       return;
     }
 
-    // 回退 Tesseract
     if (!window.Tesseract) {
-      statusEl.textContent = '⏳ 加载识别引擎…';
+      setProgress('⏳', '正在加载识别引擎…', null, '从 jsDelivr CDN 下载（国内有节点）');
       await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
-    statusEl.textContent = '⏳ 准备识别引擎…';
+
+    setProgress('⏳', '准备中…', 0, '');
     const worker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
       langPath: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
       logger: m => {
         const pct = Math.round((m.progress || 0) * 100);
-        const map = {
-          'loading tesseract core': `⏳ 加载引擎 ${pct}%…`,
-          'loading language traineddata': `⬇ 下载语言包 ${pct}%（首次约8MB）`,
-          'recognizing text': `⏳ 识别中 ${pct}%…`,
-        };
-        if (map[m.status]) statusEl.textContent = map[m.status];
+        if (m.status === 'loading tesseract core') {
+          setProgress('⏳', `加载引擎核心 ${pct}%`, pct, '约 6MB，仅首次需要下载');
+        } else if (m.status === 'loading language traineddata') {
+          setProgress('⬇', `下载中文语言包 ${pct}%`, pct, '约 8MB，仅首次，下载后自动缓存');
+        } else if (m.status === 'recognizing text') {
+          setProgress('🔍', `识别中 ${pct}%`, pct, '');
+        } else if (m.status === 'initialized api') {
+          setProgress('✓', '引擎就绪，开始识别…', 100, '');
+        }
       }
     });
     const { data: { text } } = await worker.recognize(file);
     await worker.terminate();
     applyOCRResult(parseOCRText(text), statusEl);
   } catch(e) {
-    statusEl.textContent = '❌ 自动识别失败，请对照图片手动填写';
-    statusEl.style.color = 'var(--red)';
+    statusEl.innerHTML = '<div style="font-size:12px;color:var(--red);">❌ 自动识别失败，请对照图片手动填写</div>';
+    statusEl.style.display = 'block';
   } finally {
     btn.disabled = false;
   }
@@ -2213,12 +2225,11 @@ async function tryAutoOCR() {
 
 function applyOCRResult(result, statusEl) {
   fillFromOCR(result);
+  statusEl.style.display = 'block';
   if (result.found) {
-    statusEl.textContent = `✅ 已识别：${result.name || '未知基金'}，请核对下方信息`;
-    statusEl.style.color = 'var(--green)';
+    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--green);">✅ 已识别：${result.name || '未知基金'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px;">请核对下方字段</div>`;
   } else {
-    statusEl.textContent = '⚠ 识别不完整，请对照图片补全';
-    statusEl.style.color = 'var(--orange)';
+    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--orange);">⚠ 识别不完整，请对照图片补全</div>`;
   }
 }
 
