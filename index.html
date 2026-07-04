@@ -2228,7 +2228,8 @@ async function tryAutoOCR() {
       const bitmap = await createImageBitmap(file);
       const items = await detector.detect(bitmap);
       bitmap.close();
-      if (!cancelled) applyOCRResult(parseOCRText(items.map(t => t.rawValue).join('\n')), statusEl);
+      const rawNative = items.map(t => t.rawValue).join('\n');
+      if (!cancelled) applyOCRResult(parseOCRText(rawNative), statusEl, rawNative);
       return;
     }
 
@@ -2265,7 +2266,7 @@ async function tryAutoOCR() {
     if (cancelled) { worker.terminate(); return; }
     const { data: { text } } = await worker.recognize(file);
     await worker.terminate();
-    if (!cancelled) applyOCRResult(parseOCRText(text), statusEl);
+    if (!cancelled) applyOCRResult(parseOCRText(text), statusEl, text);
   } catch(e) {
     if (!cancelled) {
       statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--red);">❌ 识别失败</div>
@@ -2282,30 +2283,37 @@ function cancelOCR() {
   if (window._ocrCancel) window._ocrCancel();
 }
 
-function applyOCRResult(result, statusEl) {
+function applyOCRResult(result, statusEl, rawText) {
   fillFromOCR(result);
   statusEl.style.display = 'block';
+  const debugHtml = rawText
+    ? `<details style="margin-top:8px;"><summary style="font-size:10px;color:var(--text3);cursor:pointer;">查看原始识别文字</summary>
+        <pre style="font-size:10px;color:var(--text3);white-space:pre-wrap;margin-top:4px;background:var(--bg3);padding:6px;border-radius:4px;max-height:120px;overflow-y:auto;">${rawText.replace(/</g,'&lt;')}</pre>
+       </details>` : '';
   if (result.found) {
-    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--green);">✅ 已识别：${result.name || '未知基金'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px;">请核对下方字段</div>`;
+    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--green);">✅ 已识别：${result.name || '未知基金'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px;">请核对下方字段</div>${debugHtml}`;
   } else {
-    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--orange);">⚠ 识别不完整，请对照图片补全</div>`;
+    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--orange);">⚠ 识别不完整，请对照图片补全</div>${debugHtml}`;
   }
 }
 
 function parseOCRText(text) {
   const result = { found: false };
+  // 允许汉字之间有空格（OCR 常见问题）
+  const f = s => s.split('').join('\\s*');
 
   // 基金名称
-  const nameMatch = text.match(/买入产品\s*([^\n\r>›»<]+)/);
+  const nameMatch = text.match(new RegExp(f('买入产品') + '\\s*([^\\n\\r>›»<]{2,})'));
   if (nameMatch) {
     result.name = nameMatch[1].trim().replace(/\s*[>›»]+\s*$/, '').trim();
     if (result.name) result.found = true;
   }
 
   // 确认金额（优先）> 买入金额 > 顶部大金额
-  const confirmAmt = text.match(/确认金额\s*([\d,]+\.?\d*)/);
-  const buyAmt = text.match(/买入金额\s*([\d,]+\.?\d*)/);
-  const topAmt = text.match(/([\d,]+\.\d{2})\s*元[\s\S]{0,20}买入成功/);
+  const confirmAmt = text.match(new RegExp(f('确认金额') + '\\s*([\\d,]+\\.?\\d*)'));
+  const buyAmt     = text.match(new RegExp(f('买入金额') + '\\s*([\\d,]+\\.?\\d*)'));
+  const topAmt     = text.match(/([\d,]+\.\d{2})\s*元[\s\S]{0,30}买\s*入\s*成\s*功/);
+  const topAmt2    = text.match(/买\s*入\s*成\s*功[\s\S]{0,30}?([\d,]+\.\d{2})\s*元/);
   if (confirmAmt) {
     result.principal = parseFloat(confirmAmt[1].replace(/,/g, ''));
     result.found = true;
@@ -2313,25 +2321,30 @@ function parseOCRText(text) {
     result.principal = parseFloat(buyAmt[1].replace(/,/g, ''));
   } else if (topAmt) {
     result.principal = parseFloat(topAmt[1].replace(/,/g, ''));
+  } else if (topAmt2) {
+    result.principal = parseFloat(topAmt2[1].replace(/,/g, ''));
   }
 
-  // 确认份额
-  const sharesMatch = text.match(/确认份额\s*([\d,]+\.?\d*)/);
+  // 确认份额；兜底：数字后跟"份"
+  const sharesMatch = text.match(new RegExp(f('确认份额') + '\\s*([\\d,]+\\.?\\d*)'));
   if (sharesMatch) {
     result.shares = parseFloat(sharesMatch[1].replace(/,/g, ''));
     result.found = true;
+  } else {
+    const sharesFb = text.match(/([\d,]+\.\d{2})\s*份/);
+    if (sharesFb) result.shares = parseFloat(sharesFb[1].replace(/,/g, ''));
   }
 
   // 确认净值
-  const navMatch = text.match(/确认净值\s*([\d.]+)/);
+  const navMatch = text.match(new RegExp(f('确认净值') + '\\s*([\\d.]+)'));
   if (navMatch) {
     result.nav = parseFloat(navMatch[1]);
     result.found = true;
   }
 
   // 日期：确认时间 > 买入时间
-  const confirmDate = text.match(/确认时间\s*(\d{4}-\d{2}-\d{2})/);
-  const buyDate = text.match(/买入时间\s*(\d{4}-\d{2}-\d{2})/);
+  const confirmDate = text.match(new RegExp(f('确认时间') + '\\s*(\\d{4}-\\d{2}-\\d{2})'));
+  const buyDate     = text.match(new RegExp(f('买入时间') + '\\s*(\\d{4}-\\d{2}-\\d{2})'));
   if (confirmDate) {
     result.date = confirmDate[1];
     result.found = true;
