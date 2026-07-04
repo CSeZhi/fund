@@ -825,7 +825,8 @@ async function fetchNavWithCache(fundKey) {
     saveDB();
     return nav;
   } catch(e) {
-    return cache || null;
+    console.error(`fetchNav[${apiCode}]`, e);
+    return { ...(cache || null), _error: e.message };
   }
 }
 
@@ -1810,17 +1811,23 @@ async function refreshAll() {
   const codes = Object.keys(db.funds);
   if (codes.length === 0) { refreshing = false; btn.classList.remove('spinning'); showToast('暂无持仓基金'); return; }
 
-  let failCount = 0;
+  let firstError = '';
   for (const code of codes) {
     const result = await fetchNavWithCache(code);
-    if (!result || result.source !== 'api') failCount++;
+    if (!result || result.source !== 'api') {
+      failCount++;
+      if (!firstError && result?._error) firstError = result._error;
+    }
   }
 
   if (failCount === codes.length) {
-    showToast('净值接口不可用，请手动录入');
+    const fund = db.funds[codes[0]];
+    const apiCode = (fund?.fundCode && /^\d{6}$/.test(fund.fundCode)) ? fund.fundCode
+      : /^\d{6}$/.test(codes[0]) ? codes[0] : '(无代码)';
+    showToast(`净值获取失败 [${apiCode}]：${firstError || '未知错误'}`);
     openManualNavSheet();
   } else if (failCount > 0) {
-    showToast(`${failCount} 个基金净值获取失败，其余已更新`);
+    showToast(`${failCount} 个基金净值获取失败：${firstError || '未知错误'}`);
   } else {
     showToast('净值已更新');
   }
@@ -2554,10 +2561,10 @@ function cancelOCR() {
 function applyOCRResult(result, statusEl, rawText) {
   fillFromOCR(result);
   statusEl.style.display = 'block';
-  const debugHtml = rawText
-    ? `<details style="margin-top:6px;"><summary style="font-size:10px;color:var(--text3);cursor:pointer;">查看原始识别文字</summary>
-        <pre style="font-size:10px;color:var(--text3);white-space:pre-wrap;margin-top:4px;background:var(--bg3);padding:6px;border-radius:4px;max-height:100px;overflow-y:auto;">${rawText.replace(/</g,'&lt;')}</pre>
-       </details>` : '';
+  const rawHtml = rawText
+    ? `<div style="margin-top:8px;font-size:10px;color:var(--text3);font-weight:600;">原始识别文字：</div>
+       <pre style="font-size:10px;color:var(--text2);white-space:pre-wrap;margin-top:3px;background:var(--bg3);padding:6px;border-radius:4px;max-height:160px;overflow-y:auto;word-break:break-all;">${rawText.replace(/</g,'&lt;')}</pre>`
+    : '';
   if (result.found) {
     const fields = [
       result.name      && `<div><span style="color:var(--text3)">名称</span> ${result.name.slice(0,12)}${result.name.length>12?'…':''}</div>`,
@@ -2567,11 +2574,9 @@ function applyOCRResult(result, statusEl, rawText) {
       result.date      && `<div><span style="color:var(--text3)">日期</span> ${result.date}</div>`,
     ].filter(Boolean).join('');
     statusEl.innerHTML = `<div style="font-size:11px;font-weight:600;color:var(--green);margin-bottom:5px;">✅ 已识别</div>
-      <div style="font-size:11px;line-height:1.8;">${fields}</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:4px;">已填入下方字段，请核对</div>${debugHtml}`;
+      <div style="font-size:11px;line-height:1.8;">${fields}</div>${rawHtml}`;
   } else {
-    statusEl.innerHTML = `<div style="font-size:11px;font-weight:600;color:var(--orange);">⚠ 识别不完整</div>
-      <div style="font-size:10px;color:var(--text3);margin-top:2px;">请对照图片补全</div>${debugHtml}`;
+    statusEl.innerHTML = `<div style="font-size:11px;font-weight:600;color:var(--orange);">⚠ 识别不完整</div>${rawHtml}`;
   }
 }
 
