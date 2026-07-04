@@ -778,12 +778,16 @@ function closeModal() {
   document.getElementById('modal-overlay').classList.remove('show');
 }
 
+let _confirmOkCb = null, _confirmCancelCb = null;
+
 function confirm(msg, onOk, onCancel) {
+  _confirmOkCb = onOk || null;
+  _confirmCancelCb = onCancel || null;
   openModal(
     '确认操作',
     `<p style="font-size:14px;line-height:1.6;">${msg}</p>`,
-    `<button class="btn btn-ghost" onclick="closeModal();${onCancel ? '(' + onCancel + ')()' : ''}">取消</button>
-     <button class="btn btn-primary" onclick="closeModal();(${onOk})()">确认</button>`
+    `<button class="btn btn-ghost" onclick="closeModal();if(_confirmCancelCb)_confirmCancelCb()">取消</button>
+     <button class="btn btn-primary" onclick="closeModal();if(_confirmOkCb)_confirmOkCb()">确认</button>`
   );
 }
 
