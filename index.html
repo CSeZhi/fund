@@ -2255,7 +2255,6 @@ async function tryAutoOCR() {
 
     const worker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-      langPath: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
       logger: m => {
         if (cancelled) return;
@@ -2426,120 +2425,142 @@ async function requestNotifPermission() {
 // ════════════════════════════════════════════════════════════
 // OCR 语言包管理（Cache API + Service Worker 拦截）
 // ════════════════════════════════════════════════════════════
+// OCR 语言包管理
+// 原理：让 Tesseract 跑一次 1×1 假图像驱动下载；
+//       SW 拦截 fetch 缓存到 ocr-pack-v1；
+//       安装状态用 localStorage 标志记录。
+// ════════════════════════════════════════════════════════════
 const OCR_CACHE_NAME = 'ocr-pack-v1';
-const OCR_PACK_FILES = [
-  { url: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',                            label: 'Tesseract 工作线程',   sizeMB: 0.5 },
-  { url: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',         label: 'OCR 引擎核心 (WASM)', sizeMB: 6.0 },
-  { url: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast/chi_sim_fast.traineddata.gz', label: '中文语言数据',       sizeMB: 2.5 },
-  { url: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast/eng.traineddata.gz',        label: '英文语言数据',         sizeMB: 0.9 },
-];
-const OCR_CHECK_URL = 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast/chi_sim_fast.traineddata.gz';
-
 let _ocrPackDownloadCancel = false;
+let _ocrPackWorker = null;
 
-async function checkOCRPackInstalled() {
-  if (!('caches' in window)) return false;
-  try {
-    const cache = await caches.open(OCR_CACHE_NAME);
-    return !!(await cache.match(OCR_CHECK_URL));
-  } catch { return false; }
+function checkOCRPackInstalled() {
+  return localStorage.getItem('ocr_pack_ready') === '1';
 }
 
 async function renderOCRPackStatus() {
   const area = document.getElementById('ocr-pack-status-area');
   if (!area) return;
-  if (!('caches' in window)) {
-    area.innerHTML = `<div style="font-size:12px;color:var(--text3);">当前浏览器不支持缓存，请使用 Chrome</div>`;
-    return;
-  }
-  const installed = await checkOCRPackInstalled();
-  const totalMB = OCR_PACK_FILES.reduce((s, f) => s + f.sizeMB, 0).toFixed(1);
+  const installed = checkOCRPackInstalled();
   if (installed) {
     area.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;">
         <div>
           <div style="font-size:13px;font-weight:600;color:var(--green);">✓ 已安装</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px;">约 ${totalMB} MB · OCR 识别无需联网</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:2px;">OCR 识别无需联网</div>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="uninstallOCRPack()" style="color:var(--red);border-color:rgba(248,113,113,.4);">删除</button>
       </div>`;
   } else {
     area.innerHTML = `
       <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
-        图片自动识别所需语言包，约 ${totalMB} MB。<br>安装一次保存本机，之后 OCR 无需联网。
+        图片自动识别所需语言包，约 10 MB。<br>安装一次保存本机，之后 OCR 无需联网。
       </div>
       <button class="btn btn-primary btn-full" onclick="downloadOCRPack()">⬇ 安装 OCR 语言包</button>`;
   }
 }
 
-function _ocrPackProgress(fileIdx, total, pct, label) {
-  const bar = pct >= 0
-    ? `<div style="margin-top:8px;background:var(--border);border-radius:2px;height:5px;overflow:hidden;">
-         <div style="height:100%;background:var(--blue);border-radius:2px;width:${pct}%;transition:width .3s;"></div>
-       </div>
-       <div style="font-size:11px;color:var(--text3);margin-top:3px;">${fileIdx + 1}/${total} &nbsp;${pct}%</div>`
-    : `<div style="margin-top:6px;font-size:11px;color:var(--text3);">${fileIdx + 1}/${total} &nbsp;计算中…</div>`;
-  return `
-    <div style="font-size:12px;font-weight:600;">⬇ 正在安装…</div>
-    <div style="font-size:11px;color:var(--text2);margin-top:3px;">${label}</div>
-    ${bar}
-    <button onclick="_ocrPackDownloadCancel=true" style="margin-top:10px;font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:3px 10px;color:var(--text2);cursor:pointer;">取消</button>`;
-}
-
 async function downloadOCRPack() {
-  if (!('caches' in window)) { showToast('当前浏览器不支持，请使用 Chrome'); return; }
   _ocrPackDownloadCancel = false;
+  _ocrPackWorker = null;
   const area = document.getElementById('ocr-pack-status-area');
   const setStatus = html => { if (area) area.innerHTML = html; };
 
-  try {
-    const cache = await caches.open(OCR_CACHE_NAME);
-    for (let i = 0; i < OCR_PACK_FILES.length; i++) {
-      if (_ocrPackDownloadCancel) break;
-      const { url, label } = OCR_PACK_FILES[i];
-      if (await cache.match(url)) continue;
+  const cancelBtn = `<button onclick="cancelOCRPackDownload()" style="margin-top:10px;font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:3px 10px;color:var(--text2);cursor:pointer;">取消</button>`;
 
-      setStatus(_ocrPackProgress(i, OCR_PACK_FILES.length, 0, label));
+  function showProgress(label, pct) {
+    const bar = pct >= 0
+      ? `<div style="margin-top:8px;background:var(--border);border-radius:2px;height:5px;overflow:hidden;">
+           <div style="height:100%;background:var(--blue);border-radius:2px;width:${pct}%;transition:width .3s;"></div>
+         </div>
+         <div style="font-size:10px;color:var(--text3);margin-top:3px;">${pct}%</div>`
+      : '';
+    setStatus(`<div style="font-size:12px;font-weight:600;">⬇ 正在安装…</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px;">${label}</div>${bar}${cancelBtn}`);
+  }
 
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`${label} 下载失败 (HTTP ${resp.status})`);
-
-      const reader = resp.body.getReader();
-      const clen = parseInt(resp.headers.get('content-length') || '0');
-      const chunks = [];
-      let received = 0;
-
-      while (true) {
-        if (_ocrPackDownloadCancel) { reader.cancel(); break; }
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-        received += value.length;
-        const pct = clen ? Math.round(received / clen * 100) : -1;
-        setStatus(_ocrPackProgress(i, OCR_PACK_FILES.length, pct, label));
-      }
-      if (_ocrPackDownloadCancel) break;
-
-      const hdrs = {};
-      try { resp.headers.forEach((v, k) => { hdrs[k] = v; }); } catch {}
-      await cache.put(url, new Response(new Blob(chunks), { headers: hdrs }));
+  // 卡住检测：60 秒无进度视为卡住
+  let lastMoveTime = Date.now();
+  let lastLogPct = -1;
+  const stuckTimer = setInterval(() => {
+    if (_ocrPackDownloadCancel) { clearInterval(stuckTimer); return; }
+    if (Date.now() - lastMoveTime > 60000) {
+      clearInterval(stuckTimer);
+      setStatus(`<div style="font-size:12px;font-weight:600;color:var(--orange);">⚠ 下载卡住了</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6;">
+          网络连接不稳定，请稍后重试。
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="downloadOCRPack()">重试</button>
+        ${cancelBtn}`);
     }
+  }, 5000);
+
+  try {
+    showProgress('加载识别引擎…', -1);
+    if (!window.Tesseract) {
+      await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+    }
+    if (_ocrPackDownloadCancel) { clearInterval(stuckTimer); renderOCRPackStatus(); return; }
+
+    _ocrPackWorker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+      logger: m => {
+        if (_ocrPackDownloadCancel) return;
+        const pct = Math.round((m.progress || 0) * 100);
+        if (pct !== lastLogPct) { lastLogPct = pct; lastMoveTime = Date.now(); }
+        if (m.status === 'loading tesseract core') {
+          showProgress(`引擎核心 (WASM) ${pct}%`, pct);
+        } else if (m.status === 'loading language traineddata') {
+          showProgress(`语言数据 ${pct}%`, pct);
+        } else if (m.status === 'initializing api' || m.status === 'initialized api') {
+          showProgress('验证中…', 99);
+        }
+      }
+    });
+
+    if (_ocrPackDownloadCancel) {
+      clearInterval(stuckTimer);
+      try { _ocrPackWorker.terminate(); } catch {}
+      _ocrPackWorker = null;
+      renderOCRPackStatus(); return;
+    }
+
+    // 跑 1×1 白色画布触发完整初始化
+    const cv = Object.assign(document.createElement('canvas'), { width: 1, height: 1 });
+    cv.getContext('2d').fillRect(0, 0, 1, 1);
+    await _ocrPackWorker.recognize(cv);
+    await _ocrPackWorker.terminate();
+    _ocrPackWorker = null;
+
+    clearInterval(stuckTimer);
+    if (_ocrPackDownloadCancel) { renderOCRPackStatus(); return; }
+
+    localStorage.setItem('ocr_pack_ready', '1');
     await renderOCRPackStatus();
-    if (!_ocrPackDownloadCancel) showToast('OCR 语言包安装完成');
+    showToast('OCR 语言包安装完成');
   } catch (e) {
-    setStatus(`
-      <div style="font-size:12px;font-weight:600;color:var(--red);">❌ ${e.message || '下载失败'}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:4px;">请检查网络后重试</div>
-      <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="downloadOCRPack()">重试</button>`);
+    clearInterval(stuckTimer);
+    _ocrPackWorker = null;
+    if (!_ocrPackDownloadCancel) {
+      setStatus(`<div style="font-size:12px;font-weight:600;color:var(--red);">❌ ${e.message || '安装失败'}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px;">请检查网络后重试</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="downloadOCRPack()">重试</button>`);
+    }
   }
 }
 
+function cancelOCRPackDownload() {
+  _ocrPackDownloadCancel = true;
+  if (_ocrPackWorker) { try { _ocrPackWorker.terminate(); } catch {} _ocrPackWorker = null; }
+  renderOCRPackStatus();
+}
+
 async function uninstallOCRPack() {
-  try {
-    await caches.delete(OCR_CACHE_NAME);
-    await renderOCRPackStatus();
-    showToast('OCR 语言包已删除');
-  } catch { showToast('删除失败'); }
+  localStorage.removeItem('ocr_pack_ready');
+  try { await caches.delete(OCR_CACHE_NAME); } catch {}
+  await renderOCRPackStatus();
+  showToast('已标记为未安装，下次使用前需重新安装');
 }
 
 function switchToSettingsOCR() {
