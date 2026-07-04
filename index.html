@@ -1147,19 +1147,25 @@ function openAddBatchSheet() {
     '新增买入',
     `<div style="margin-bottom:16px;">
       <div style="display:flex;gap:8px;margin-bottom:8px;">
-        <button class="btn btn-ghost" style="flex:1" onclick="triggerScanImage()" id="scan-btn">📷 扫描截图</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="triggerScanImage()" id="scan-btn">📷 导入截图</button>
         <button class="btn btn-ghost" style="flex:1" onclick="triggerPasteText()">📋 粘贴文字</button>
       </div>
       <input type="file" id="scan-input" accept="image/*" style="display:none" onchange="handleScanFile(this)">
-      <div id="scan-status" style="display:none;margin-top:8px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--bg3);font-size:12px;text-align:center;"></div>
+      <div id="scan-status" style="display:none;margin-top:8px;padding:8px 12px;border-radius:var(--radius-sm);background:var(--bg3);font-size:12px;text-align:center;"></div>
+      <div id="img-preview-wrap" style="display:none;margin-top:8px;position:relative;">
+        <img id="img-preview" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;">
+        <button onclick="clearImgPreview()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;line-height:24px;text-align:center;">×</button>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3);text-align:center;">对照图片填写下方字段</div>
+        <button id="ocr-try-btn" class="btn btn-ghost btn-full" style="margin-top:6px;font-size:12px;" onclick="tryAutoOCR()">✨ 尝试自动识别</button>
+      </div>
       <div id="paste-area" style="display:none;margin-top:8px;">
-        <textarea id="paste-input" class="form-input" rows="4" placeholder="将天天基金买入确认页面的文字粘贴到这里，然后点识别" style="resize:none;font-size:12px;"></textarea>
+        <textarea id="paste-input" class="form-input" rows="5" placeholder="将天天基金确认页面的文字粘贴到这里，然后点识别" style="resize:none;font-size:12px;"></textarea>
         <button class="btn btn-primary btn-full" style="margin-top:6px;" onclick="parsePastedText()">识别文字</button>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
       <div style="flex:1;height:1px;background:var(--border);"></div>
-      <span style="font-size:11px;color:var(--text3);">或手动填写</span>
+      <span style="font-size:11px;color:var(--text3);">对照填写或手动输入</span>
       <div style="flex:1;height:1px;background:var(--border);"></div>
     </div>
     <div class="form-group">
@@ -1168,7 +1174,7 @@ function openAddBatchSheet() {
     </div>
     <div class="form-group">
       <label class="form-label">基金名称（可选）</label>
-      <input class="form-input" id="add-name" placeholder="扫描截图后自动填写">
+      <input class="form-input" id="add-name" placeholder="从截图中填入基金名称">
     </div>
     <div class="row">
       <div class="form-group">
@@ -1977,19 +1983,44 @@ function loadScript(src) {
   });
 }
 
-async function handleScanFile(input) {
+let _scanFileObj = null;
+
+function handleScanFile(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = '';
+  _scanFileObj = file;
+
+  // 显示图片预览，用户对照填写
+  const url = URL.createObjectURL(file);
+  const img = document.getElementById('img-preview');
+  const wrap = document.getElementById('img-preview-wrap');
+  img.src = url;
+  img.onload = () => URL.revokeObjectURL(url);
+  wrap.style.display = 'block';
 
   const statusEl = document.getElementById('scan-status');
-  const scanBtn = document.getElementById('scan-btn');
+  statusEl.style.display = 'none';
+}
+
+function clearImgPreview() {
+  document.getElementById('img-preview-wrap').style.display = 'none';
+  document.getElementById('img-preview').src = '';
+  _scanFileObj = null;
+}
+
+async function tryAutoOCR() {
+  const file = _scanFileObj;
+  if (!file) { showToast('请先导入截图'); return; }
+
+  const statusEl = document.getElementById('scan-status');
+  const btn = document.getElementById('ocr-try-btn');
   statusEl.style.display = 'block';
   statusEl.style.color = 'var(--text2)';
-  scanBtn.disabled = true;
+  btn.disabled = true;
 
   try {
-    // 优先用浏览器内置 OCR（Chrome on Android 原生支持，无需下载）
+    // 优先用浏览器内置 OCR
     if ('TextDetector' in window) {
       statusEl.textContent = '⏳ 识别中…';
       const detector = new TextDetector();
@@ -1997,63 +2028,49 @@ async function handleScanFile(input) {
       const items = await detector.detect(bitmap);
       bitmap.close();
       const text = items.map(t => t.rawValue).join('\n');
-      const result = parseOCRText(text);
-      fillFromOCR(result);
-      if (result.found) {
-        statusEl.textContent = `✅ 已识别：${result.name || '未知基金'}，请核对下方信息后确认`;
-        statusEl.style.color = 'var(--green)';
-      } else {
-        statusEl.textContent = '⚠ 识别结果不完整，请手动补全或改用"粘贴文字"方式';
-        statusEl.style.color = 'var(--orange)';
-      }
+      applyOCRResult(parseOCRText(text), statusEl);
       return;
     }
 
-    // 回退到 Tesseract（需下载语言包）
+    // 回退 Tesseract
     if (!window.Tesseract) {
       statusEl.textContent = '⏳ 加载识别引擎…';
       await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
-
     statusEl.textContent = '⏳ 准备识别引擎…';
-
     const worker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
       langPath: 'https://cdn.jsdelivr.net/gh/naptha/tessdata@gh-pages/4.0.0_fast',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
       logger: m => {
         const pct = Math.round((m.progress || 0) * 100);
-        const msgs = {
-          'loading tesseract core': `⏳ 加载引擎核心 ${pct}%…`,
-          'initializing tesseract': '⏳ 初始化引擎…',
+        const map = {
+          'loading tesseract core': `⏳ 加载引擎 ${pct}%…`,
           'loading language traineddata': `⬇ 下载语言包 ${pct}%（首次约8MB）`,
-          'initializing api with lang': '⏳ 语言包就绪，准备识别…',
           'recognizing text': `⏳ 识别中 ${pct}%…`,
         };
-        const msg = msgs[m.status];
-        if (msg) statusEl.textContent = msg;
+        if (map[m.status]) statusEl.textContent = map[m.status];
       }
     });
-
     const { data: { text } } = await worker.recognize(file);
     await worker.terminate();
-
-    const result = parseOCRText(text);
-    fillFromOCR(result);
-
-    if (result.found) {
-      statusEl.textContent = `✅ 已识别：${result.name || '未知基金'}，请核对下方信息后确认`;
-      statusEl.style.color = 'var(--green)';
-    } else {
-      statusEl.textContent = '⚠ 识别结果不完整，已填入部分内容，请手动补全';
-      statusEl.style.color = 'var(--orange)';
-    }
-  } catch (e) {
-    statusEl.textContent = '❌ 识别失败，请手动填写';
+    applyOCRResult(parseOCRText(text), statusEl);
+  } catch(e) {
+    statusEl.textContent = '❌ 自动识别失败，请对照图片手动填写';
     statusEl.style.color = 'var(--red)';
-    console.error(e);
   } finally {
-    scanBtn.disabled = false;
+    btn.disabled = false;
+  }
+}
+
+function applyOCRResult(result, statusEl) {
+  fillFromOCR(result);
+  if (result.found) {
+    statusEl.textContent = `✅ 已识别：${result.name || '未知基金'}，请核对下方信息`;
+    statusEl.style.color = 'var(--green)';
+  } else {
+    statusEl.textContent = '⚠ 识别不完整，请对照图片补全';
+    statusEl.style.color = 'var(--orange)';
   }
 }
 
