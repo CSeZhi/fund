@@ -715,22 +715,18 @@ async function fetchNavFromMobileAPI(code) {
   params.set('FCODE', code);
   params.set('pageIndex', '1');
   params.set('pagesize', '1');
-  // 不带自定义 header，避免触发 CORS preflight
-  const resp = await fetch(
-    `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNHisNetList?${params}`,
-    { signal: AbortSignal.timeout(8000) }
-  );
-  const data = await resp.json();
-  if (!data.Success || !data.Datas?.length) throw new Error('no data');
-  const d = data.Datas[0];
-  return {
-    fundcode: code,
-    dwjz: d.DWJZ,
-    gsz: d.DWJZ,
-    gszzl: d.JZZZL,
-    gztime: d.FSRQ + ' 00:00',
-    jzrq: d.FSRQ,
-  };
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const resp = await fetch(
+      `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNHisNetList?${params}`,
+      { signal: ctrl.signal }
+    );
+    const data = await resp.json();
+    if (!data.Success || !data.Datas?.length) throw new Error('no data');
+    const d = data.Datas[0];
+    return { fundcode: code, dwjz: d.DWJZ, gsz: d.DWJZ, gszzl: d.JZZZL, gztime: d.FSRQ + ' 00:00', jzrq: d.FSRQ };
+  } finally { clearTimeout(t); }
 }
 
 function fetchNav(code) {
@@ -777,13 +773,16 @@ async function searchFundName(code) {
     const params = new URLSearchParams(_EMBase);
     params.set('m', '1');
     params.set('key', code);
-    // 同样不带自定义 header
-    const resp = await fetch(
-      `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?${params}`,
-      { signal: AbortSignal.timeout(5000) }
-    );
-    const data = await resp.json();
-    return data?.Datas?.[0]?.FundBaseInfo?.SHORTNAME || data?.Datas?.[0]?.NAME || null;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    try {
+      const resp = await fetch(
+        `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?${params}`,
+        { signal: ctrl.signal }
+      );
+      const data = await resp.json();
+      return data?.Datas?.[0]?.FundBaseInfo?.SHORTNAME || data?.Datas?.[0]?.NAME || null;
+    } finally { clearTimeout(t); }
   } catch { return null; }
 }
 
@@ -1101,6 +1100,53 @@ function hideFundDetail() {
   renderHoldings();
 }
 
+function openFundEditSheet(code) {
+  const fund = db.funds[code];
+  if (!fund) return;
+  openSheet(
+    '编辑基金信息',
+    `<div class="form-group">
+       <label class="form-label">基金代码（6位数字）</label>
+       <input class="form-input" id="fedit-code" maxlength="6" inputmode="numeric"
+         value="${fund.fundCode || ''}" placeholder="如 018529">
+     </div>
+     <div class="form-group">
+       <label class="form-label">基金名称</label>
+       <input class="form-input" id="fedit-name" value="${(fund.fundName || '').replace(/"/g,'&quot;')}" placeholder="基金全称">
+     </div>`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-primary" style="flex:2" onclick="submitFundEdit('${code}')">保存</button>`
+  );
+}
+
+function submitFundEdit(code) {
+  const fund = db.funds[code];
+  if (!fund) return;
+  const newCode = document.getElementById('fedit-code')?.value.trim();
+  const newName = document.getElementById('fedit-name')?.value.trim();
+
+  if (newCode && !/^\d{6}$/.test(newCode)) { showToast('基金代码须为6位数字'); return; }
+
+  if (newCode) fund.fundCode = newCode;
+  if (newName) fund.fundName = newName;
+
+  // 如果 fundKey 是名称片段而不是代码，且用户填了代码，询问是否迁移
+  if (newCode && code !== newCode && !db.funds[newCode]) {
+    db.funds[newCode] = fund;
+    delete db.funds[code];
+    saveDB();
+    closeSheet();
+    _currentDetailCode = newCode;
+    renderFundDetail(newCode);
+    showToast('基金代码已更新，数据已迁移');
+  } else {
+    saveDB();
+    closeSheet();
+    renderFundDetail(code);
+    showToast('基金信息已保存');
+  }
+}
+
 function openFundNavSheet(code) {
   const fund = db.funds[code];
   if (!fund) return;
@@ -1278,7 +1324,10 @@ function renderFundDetail(code) {
         </svg>
       </button>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fundName}</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fundName}</div>
+          <button onclick="openFundEditSheet('${code}')" style="flex-shrink:0;font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:1px 6px;cursor:pointer;color:var(--text3);">编辑</button>
+        </div>
         <div style="font-size:11px;color:var(--text3);">${codeStr ? codeStr + ' · ' : ''}${batches.length} 笔 · 投入 ${fmtMoney(totalPrincipal)}</div>
       </div>
       <div style="text-align:right;flex-shrink:0;">
@@ -2588,13 +2637,20 @@ function parseOCRText(rawText) {
   }
   const result = { found: false };
 
-  // 基金名称：取「买入产品」到下一字段标签之间的所有文字，
-  // 按段落长度降序拼接（解决 OCR 列读序导致"接C"排在长名前面的问题）
-  const nameBlock = text.match(/买入产品\s*([\s\S]*?)\s*(?:买入金额|买入时间|付款方式|确认信息|买入信息)/)?.[1];
-  if (nameBlock) {
-    const segments = nameBlock.replace(/[>›»<]/g, '').split(/\s+/).filter(s => s.trim());
-    const name = segments.sort((a, b) => b.length - a.length).join('');
-    if (name) { result.name = name; result.found = true; }
+  // 基金名称：OCR 列读序可能把主名称放在"买入产品"标签之前
+  // 策略：在"买入信息"到"买入金额"的整个区块里，找最长的 CJK+字母连续串
+  const infoBlock = text.match(/买入信息([\s\S]*?)买入金额/)?.[1] || text;
+  // 把整个区块里的汉字空格都去掉，然后拆出所有长度≥4的连续词
+  const cleanBlock = infoBlock.replace(/[>›»<]/g, '').replace(/([一-龥])\s+/g, '$1');
+  const nameTokens = cleanBlock.match(/[一-鿿\w]{4,}/g) || [];
+  // 过滤掉字段标签本身
+  const labelWords = new Set(['买入信息','买入产品','买入金额','买入时间','付款方式','确认信息','招商银行','储蓄卡']);
+  const nameSegs = nameTokens.filter(t => !labelWords.has(t) && !/^\d+$/.test(t));
+  if (nameSegs.length) {
+    // 最长片段排前，拼成完整名称
+    const name = nameSegs.sort((a, b) => b.length - a.length).join('');
+    result.name = name;
+    result.found = true;
   }
 
   // 确认金额（优先）> 买入金额 > 顶部大金额
