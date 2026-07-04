@@ -696,29 +696,29 @@ function isPast15(submitTime) {
 
 // ════════════════════════════════════════════════════════════
 // 净值接口
-// 主路：HTTPS JSONP（fundgz.1234567.com.cn），解决混合内容问题
-// 兜底：东方财富移动 API（有 CORS，无需代理）
+// 主路：HTTPS JSONP（fundgz.1234567.com.cn）
+// 兜底：东方财富移动 API（纯 GET，不带自定义 header，避免 CORS 预检失败）
 // ════════════════════════════════════════════════════════════
 const pendingJsonp = {};
 let jsonpFailCount = 0;
 
-// 东方财富移动 API 固定参数
+// 东方财富基础参数（放 URL query，不放 header）
 const _EMBase = new URLSearchParams({
   product: 'EFund',
   deviceid: '874C427C-7C24-4980-A835-66FD40B67605',
   plat: 'Iphone',
   version: '6.5.5',
 });
-const _EMHeaders = { validmark: 'aKVEnBbJF9Nip2Wjf4de/fSvA8W3X3iB4L6vT0Y5cxvZbEfEm17udZKUD2qy37dLRY3bzzHLDv+up/Yn3OTo5Q==' };
 
 async function fetchNavFromMobileAPI(code) {
   const params = new URLSearchParams(_EMBase);
   params.set('FCODE', code);
   params.set('pageIndex', '1');
   params.set('pagesize', '1');
+  // 不带自定义 header，避免触发 CORS preflight
   const resp = await fetch(
     `https://fundmobapi.eastmoney.com/FundMNewApi/FundMNHisNetList?${params}`,
-    { headers: _EMHeaders, signal: AbortSignal.timeout(8000) }
+    { signal: AbortSignal.timeout(8000) }
   );
   const data = await resp.json();
   if (!data.Success || !data.Datas?.length) throw new Error('no data');
@@ -753,13 +753,12 @@ function fetchNav(code) {
       finish(resolve, data);
     };
 
-    // 主路：HTTPS JSONP（原来是 http，改成 https 即可过混合内容检查）
+    // 主路：HTTPS JSONP
     const script = document.createElement('script');
     script.src = `https://fundgz.1234567.com.cn/js/${code}.js?v=${Date.now()}`;
     script.onerror = () => {
       clearTimeout(timeout);
       delete pendingJsonp[code];
-      // JSONP 脚本加载失败 → 直接走移动 API
       fetchNavFromMobileAPI(code)
         .then(v => finish(resolve, v))
         .catch(e => { jsonpFailCount++; finish(reject, e); });
@@ -778,9 +777,10 @@ async function searchFundName(code) {
     const params = new URLSearchParams(_EMBase);
     params.set('m', '1');
     params.set('key', code);
+    // 同样不带自定义 header
     const resp = await fetch(
       `https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx?${params}`,
-      { headers: _EMHeaders, signal: AbortSignal.timeout(5000) }
+      { signal: AbortSignal.timeout(5000) }
     );
     const data = await resp.json();
     return data?.Datas?.[0]?.FundBaseInfo?.SHORTNAME || data?.Datas?.[0]?.NAME || null;
@@ -2578,10 +2578,10 @@ function parseOCRText(rawText) {
   }
   const result = { found: false };
 
-  // 基金名称（支持跨行：到 > 或下一字段标签截止）
-  const nameMatch = text.match(/买入产品\s*([\s\S]+?)(?=[>›»]|\s*(?:买入金额|买入时间|付款方式|确认信息|买入信息))/);
+  // 基金名称（匹配到下一字段标签为止，>箭头从结果里删而非作为停止符）
+  const nameMatch = text.match(/买入产品\s*([\s\S]+?)(?=\s*(?:买入金额|买入时间|付款方式|确认信息|买入信息))/);
   if (nameMatch) {
-    result.name = nameMatch[1].trim().replace(/\s*[>›»]+\s*$/, '').replace(/\s+/g, '').trim();
+    result.name = nameMatch[1].replace(/[>›»<]/g, '').replace(/\s+/g, '').trim();
     if (result.name) result.found = true;
   }
 
