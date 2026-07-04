@@ -1120,7 +1120,9 @@ function renderFundDetail(code) {
   const cache = db.navCache[code];
   const rules = db.settings.stopProfitRules;
   const market = getMarketStatus();
-  const batches = (fund.batches || []).filter(b => b.status !== 'fully_sold' && b.status !== 'confirmed_sold');
+  const batches = (fund.batches || [])
+    .filter(b => b.status !== 'fully_sold' && b.status !== 'confirmed_sold')
+    .sort((a, b) => (a.buyDate || '').localeCompare(b.buyDate || ''));
 
   const navStr = cache ? fmt4(cache.dwjz) : '—';
   const navDate = cache ? (cache.jzrq || '') : '';
@@ -2535,8 +2537,8 @@ function parseOCRText(rawText) {
   }
   const result = { found: false };
 
-  // 基金名称
-  const nameMatch = text.match(/买入产品\s*([^\n\r>›»<]{2,})/);
+  // 基金名称（支持跨行：到 > 或下一字段标签截止）
+  const nameMatch = text.match(/买入产品\s*([\s\S]+?)(?=[>›»]|\s*(?:买入金额|买入时间|付款方式|确认信息|买入信息))/);
   if (nameMatch) {
     result.name = nameMatch[1].trim().replace(/\s*[>›»]+\s*$/, '').replace(/\s+/g, '').trim();
     if (result.name) result.found = true;
