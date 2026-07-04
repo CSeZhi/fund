@@ -392,6 +392,14 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 
   <button class="btn btn-primary btn-full" onclick="saveSettings()" style="margin-top:4px;">保存设置</button>
 
+  <!-- 推送通知 -->
+  <div class="section-title">推送通知</div>
+  <div class="card">
+    <div class="card-body" id="notif-status-area">
+      <div style="font-size:12px;color:var(--text3);">加载中…</div>
+    </div>
+  </div>
+
   <!-- 数据管理 -->
   <div class="section-title">数据管理</div>
   <div id="storage-bar">
@@ -1212,6 +1220,7 @@ function updateAlertBanners(triggers) {
 }
 
 function updateProfitBanner(triggers) {
+  checkAndNotify(triggers);
   const el = document.getElementById('profit-banner');
   if (triggers.length === 0) { el.style.display = 'none'; return; }
   const names = triggers.map(t => `${t.fund}(${t.trigger.rule.label} ${fmtPct(t.realRate)})`);
@@ -1875,6 +1884,8 @@ function renderSettings() {
 
   // 节假日
   document.getElementById('set-holidays').value = db.settings.holidays.join('\n');
+
+  renderNotifStatus();
 }
 
 function renderFeeList() {
@@ -2272,9 +2283,71 @@ function fillFromOCR(result) {
 }
 
 // ════════════════════════════════════════════════════════════
+// 推送通知
+// ════════════════════════════════════════════════════════════
+const _notifiedTriggers = new Set();
+
+async function sendNotification(title, body, tag) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    reg.active.postMessage({ type: 'SHOW_NOTIFICATION', title, body, tag });
+  } catch {
+    new Notification(title, { body, icon: './icon-192.png' });
+  }
+}
+
+function checkAndNotify(profitTriggers) {
+  for (const { fund, batch, trigger, realRate } of profitTriggers) {
+    const key = `${batch.id}_${trigger.ruleIdx}`;
+    if (_notifiedTriggers.has(key)) continue;
+    _notifiedTriggers.add(key);
+    sendNotification(
+      '止盈提醒 · 止盈助手',
+      `${fund}（${batch.buyDate}）已达${trigger.rule.label}，当前收益 ${fmtPct(realRate)}`,
+      key
+    );
+  }
+}
+
+function renderNotifStatus() {
+  const area = document.getElementById('notif-status-area');
+  if (!area) return;
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+    area.innerHTML = `<div style="font-size:12px;color:var(--text3);">当前浏览器不支持推送通知<br>建议使用 Chrome 并添加到桌面</div>`;
+    return;
+  }
+  const perm = Notification.permission;
+  if (perm === 'granted') {
+    area.innerHTML = `<div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:15px;">🔔</span>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--green);">通知已授权</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:1px;">净值刷新时若有批次达止盈线将推送系统通知</div>
+      </div>
+    </div>`;
+  } else if (perm === 'denied') {
+    area.innerHTML = `<div style="font-size:12px;color:var(--red);line-height:1.6;">通知权限已被拒绝<br>请在浏览器地址栏左侧的锁图标 → 网站设置中手动开启通知</div>`;
+  } else {
+    area.innerHTML = `<div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">开启后，净值刷新时若有批次达到止盈线，即使 App 在后台也会弹出系统通知。</div>
+      <button class="btn btn-primary btn-full" onclick="requestNotifPermission()">🔔 授权通知推送</button>`;
+  }
+}
+
+async function requestNotifPermission() {
+  const result = await Notification.requestPermission();
+  renderNotifStatus();
+  if (result === 'granted') showToast('通知已开启');
+  else showToast('通知未开启，可在浏览器设置中手动授权');
+}
+
+// ════════════════════════════════════════════════════════════
 // 初始化
 // ════════════════════════════════════════════════════════════
 (function init() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
   loadDB();
   renderHoldings();
   updateCountdown();
