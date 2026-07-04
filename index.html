@@ -1054,8 +1054,59 @@ function hideFundDetail() {
   renderHoldings();
 }
 
-function toggleFundDividend(code) {
+function openFundNavSheet(code) {
   const fund = db.funds[code];
+  if (!fund) return;
+  const cache = db.navCache[code];
+  const name = fund.fundName || code;
+  const today = formatDate(new Date());
+  openSheet(
+    `录入净值 · ${name}`,
+    `<div class="form-group">
+       <label class="form-label">净值日期</label>
+       <input class="form-input" id="fnav-date" type="date" value="${today}">
+     </div>
+     <div class="row">
+       <div class="form-group">
+         <label class="form-label">真实净值（dwjz）*</label>
+         <input class="form-input" id="fnav-dwjz" type="number" step="0.0001" inputmode="decimal" value="${cache?.dwjz || ''}">
+       </div>
+       <div class="form-group">
+         <label class="form-label">估值（gsz，可选）</label>
+         <input class="form-input" id="fnav-gsz" type="number" step="0.0001" inputmode="decimal" value="${cache?.gsz || ''}">
+       </div>
+     </div>
+     <button class="btn btn-ghost btn-sm" style="margin-bottom:8px;color:var(--red);border-color:rgba(248,113,113,.4);" onclick="resetFundNav('${code}')">↺ 清除该基金净值缓存</button>`,
+    `<button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+     <button class="btn btn-primary" style="flex:2" onclick="submitFundNav('${code}')">确认录入</button>`
+  );
+}
+
+function submitFundNav(code) {
+  const dwjz = document.getElementById('fnav-dwjz')?.value;
+  const gsz  = document.getElementById('fnav-gsz')?.value;
+  const date = document.getElementById('fnav-date')?.value;
+  if (!dwjz) { showToast('请填写真实净值'); return; }
+  db.navCache[code] = {
+    dwjz, gsz: gsz || dwjz,
+    jzrq: date, gztime: '',
+    fetchedAt: Date.now(), source: 'manual'
+  };
+  saveDB();
+  closeSheet();
+  renderFundDetail(code);
+  showToast('净值已录入');
+}
+
+function resetFundNav(code) {
+  delete db.navCache[code];
+  saveDB();
+  closeSheet();
+  renderFundDetail(code);
+  showToast('该基金净值缓存已清除');
+}
+
+function toggleFundDividend(code) {  const fund = db.funds[code];
   if (!fund) return;
   fund.hasDividend = fund.hasDividend === false ? true : false;
   saveDB();
@@ -1184,6 +1235,7 @@ function renderFundDetail(code) {
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-size:12px;color:var(--text2);">${navInfo}</div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:6px;justify-content:flex-end;">
+          <button onclick="openFundNavSheet('${code}')" style="font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text2);">✏️ 净值</button>
           <button onclick="toggleFundDividend('${code}')" style="font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:${fund.hasDividend !== false ? 'var(--green)' : 'var(--text3)'};">${fund.hasDividend !== false ? '分红再投 ✓' : '无分红'}</button>
           <button class="btn btn-primary btn-sm" onclick="openAddBatchSheet({code:'${code}',name:'${fundName.replace(/'/g,'\\u0027')}',hasDividend:${fund.hasDividend !== false}})">+ 买入</button>
         </div>
@@ -1334,7 +1386,7 @@ function openAddBatchSheet(prefill = {}) {
       <input class="form-input" id="add-name" placeholder="从截图中填入基金名称" value="${prefill.name || ''}">
     </div>
     <label style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg3);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:14px;">
-      <input type="checkbox" id="add-has-dividend" style="width:16px;height:16px;accent-color:var(--blue);flex-shrink:0;" ${prefill.hasDividend !== false ? 'checked' : ''}>
+      <input type="checkbox" id="add-has-dividend" style="width:16px;height:16px;accent-color:var(--blue);flex-shrink:0;" ${prefill.hasDividend === true ? 'checked' : ''}>
       <div>
         <div style="font-size:13px;font-weight:600;">支持分红再投资</div>
         <div style="font-size:11px;color:var(--text3);margin-top:1px;">混合/股票型基金可开启，货币基金通常无分红</div>
