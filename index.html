@@ -1144,6 +1144,7 @@ function renderFundDetail(code) {
       </div>
       <div style="text-align:right;flex-shrink:0;">
         <div style="font-size:12px;color:var(--text2);">${navInfo}</div>
+        <button class="btn btn-primary btn-sm" style="margin-top:6px;" onclick="openAddBatchSheet({code:'${code}',name:'${fundName.replace(/'/g,'\\u0027')}' })">+ 买入</button>
       </div>
     </div>
     ${batchesHtml}`;
@@ -1256,10 +1257,10 @@ function updateBatchStatus(batch) {
 // ════════════════════════════════════════════════════════════
 // 添加买入批次
 // ════════════════════════════════════════════════════════════
-function openAddBatchSheet() {
+function openAddBatchSheet(prefill = {}) {
   const today = formatDate(new Date());
   openSheet(
-    '新增买入',
+    prefill.name ? `新增买入 · ${prefill.name}` : '新增买入',
     `<div style="margin-bottom:16px;">
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <button class="btn btn-ghost" style="flex:1" onclick="triggerScanImage()" id="scan-btn">📷 导入截图</button>
@@ -1285,11 +1286,11 @@ function openAddBatchSheet() {
     </div>
     <div class="form-group">
       <label class="form-label">基金代码（可选）</label>
-      <input class="form-input" id="add-code" placeholder="如 110011，无代码可留空" maxlength="6" inputmode="numeric">
+      <input class="form-input" id="add-code" placeholder="如 110011，无代码可留空" maxlength="6" inputmode="numeric" value="${prefill.code || ''}">
     </div>
     <div class="form-group">
       <label class="form-label">基金名称（可选）</label>
-      <input class="form-input" id="add-name" placeholder="从截图中填入基金名称">
+      <input class="form-input" id="add-name" placeholder="从截图中填入基金名称" value="${prefill.name || ''}">
     </div>
     <div class="row">
       <div class="form-group">
