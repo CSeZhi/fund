@@ -264,21 +264,44 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 .chevron { transition: transform .25s; }
 .chevron.open { transform: rotate(180deg); }
 
-/* ── 基金卡片（两层结构）── */
-.fund-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
-.fund-header { padding: 16px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.fund-header:active { background: var(--card2); }
+/* ── 基金汇总卡片 ── */
+.fund-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; cursor: pointer; }
+.fund-card:active { opacity: .85; }
+.fund-header { padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; }
 .fund-name-text { font-size: 15px; font-weight: 700; }
 .fund-code-tag { font-size: 11px; color: var(--text3); background: var(--bg); padding: 2px 7px; border-radius: 4px; }
-.fund-meta-row { font-size: 12px; color: var(--text2); margin-top: 5px; }
-.fund-batches-container { border-top: 1px solid var(--border); }
-.batch-row-wrapper { border-bottom: 1px solid var(--border); }
-.batch-row-wrapper:last-child { border-bottom: none; }
-.batch-row { padding: 12px 16px; display: flex; align-items: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.batch-row:active { background: var(--card2); }
-.batch-detail { padding: 14px 16px; background: var(--bg3); }
-.batch-detail .data-row { padding: 6px 0; display: flex; justify-content: space-between; align-items: center; }
-.batch-detail .data-row + .data-row { border-top: 1px solid var(--border); }
+.fund-meta-row { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+/* ── 基金详情页 ── */
+.detail-header {
+  position: sticky; top: 44px; z-index: 50;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; margin: -16px -16px 16px;
+}
+.detail-back-btn {
+  width: 36px; height: 36px; background: var(--card2); border: none;
+  border-radius: 50%; color: var(--text); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.detail-back-btn:active { background: var(--border); }
+
+/* ── 批次卡片（详情页）── */
+.batch-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; overflow: hidden; }
+.batch-card-header { padding: 14px 16px 10px; display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border); }
+.batch-num { font-size: 12px; font-weight: 700; color: var(--blue); background: rgba(96,165,250,.12); padding: 2px 8px; border-radius: 4px; }
+.batch-card-body { padding: 14px 16px; }
+.batch-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.batch-info-key { font-size: 11px; color: var(--text3); margin-bottom: 2px; }
+.batch-info-val { font-size: 14px; font-weight: 600; }
+.target-nav-section { background: var(--bg3); border-radius: var(--radius-sm); padding: 11px 12px; margin-bottom: 12px; }
+.target-nav-title { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+.target-nav-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; }
+.target-nav-row + .target-nav-row { border-top: 1px solid var(--border); }
+.target-nav-row.triggered { opacity: .4; }
+.target-nav-label { font-size: 12px; color: var(--text2); flex: 1; }
+.target-nav-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.batch-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -313,6 +336,11 @@ body { background: var(--bg); color: var(--text); font-family: -apple-system, Bl
 <!-- 页面：持仓 -->
 <div id="page-holdings" class="page active">
   <div id="holdings-list"></div>
+</div>
+
+<!-- 页面：基金详情 -->
+<div id="page-fund-detail" class="page">
+  <div id="fund-detail-content"></div>
 </div>
 
 <!-- 页面：台账 -->
@@ -792,12 +820,14 @@ function confirm(msg, onOk, onCancel) {
 }
 
 function switchTab(tab, btn) {
+  _currentDetailCode = null;
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('page-' + tab).classList.add('active');
   btn.classList.add('active');
   if (tab === 'ledger') renderLedger();
   if (tab === 'settings') renderSettings();
+  if (tab === 'holdings') renderHoldings();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -840,7 +870,7 @@ function updateCountdown() {
 }
 
 // ════════════════════════════════════════════════════════════
-// 持仓渲染
+// 持仓渲染（基金汇总列表）
 // ════════════════════════════════════════════════════════════
 async function renderHoldings() {
   const list = document.getElementById('holdings-list');
@@ -867,115 +897,54 @@ async function renderHoldings() {
 
     calibratePendingRedemptions(fund, cache);
 
-    // 计算每笔批次数据
     const batchDataList = [];
     for (const batch of batches) {
       if (batch.status === 'fully_sold' || batch.status === 'confirmed_sold') continue;
-
       const cost = calcBatchEffectiveCost(batch);
-      const currentShares = calcBatchCurrentShares(batch);
-      const holdDays = calcHoldDays(batch.buyDate);
-      const feeRate = calcFeeRate(holdDays);
-
       let realRate = null, estimateRate = null;
       if (cache) {
         if (cache.dwjz) realRate = calcProfitRate(parseFloat(cache.dwjz), cost);
         if (cache.gsz && market.isTrading) estimateRate = calcProfitRate(parseFloat(cache.gsz), cost);
       }
-
       if (realRate !== null) {
         const trigger = checkStopProfit(batch, realRate);
         if (trigger) profitTriggers.push({ fund: fund.fundName || code, batch, trigger, realRate });
       }
-
-      batchDataList.push({ batch, cost, currentShares, holdDays, feeRate, realRate, estimateRate });
+      batchDataList.push({ batch, cost, realRate, estimateRate });
     }
 
     if (batchDataList.length === 0) continue;
 
-    // 基金汇总信息
     const totalPrincipal = batchDataList.reduce((s, b) => s + b.batch.principal, 0);
     const activeBatches = batchDataList.length;
     const rates = batchDataList.map(b => b.realRate).filter(r => r !== null);
     const bestRate = rates.length > 0 ? Math.max(...rates) : null;
-    const bestRateStr = bestRate !== null ? fmtPct(bestRate) : '—';
-    const bestRateClass = bestRate !== null ? (bestRate > 0 ? 'profit' : bestRate < 0 ? 'loss' : 'neutral') : 'neutral';
     const navStr = cache ? fmt4(cache.dwjz) : '—';
     const codeTag = code && /^\d{6}$/.test(code) ? `<span class="fund-code-tag">${code}</span>` : '';
-    const fundExpandId = 'fund_batches_' + code;
-    const chevFundId = 'chev_fund_' + code;
+    const bestRateStr = bestRate !== null ? fmtPct(bestRate) : '—';
+    const bestRateClass = bestRate !== null ? (bestRate > 0 ? 'profit' : bestRate < 0 ? 'loss' : 'neutral') : 'neutral';
+    const estRates = batchDataList.map(b => b.estimateRate).filter(r => r !== null);
+    const bestEst = estRates.length > 0 ? Math.max(...estRates) : null;
+    const bestEstStr = bestEst !== null ? fmtPct(bestEst) : null;
+    const bestEstClass = bestEst !== null ? (bestEst > 0 ? 'profit' : bestEst < 0 ? 'loss' : 'neutral') : 'neutral';
 
-    html += `<div class="fund-card">
-      <div class="fund-header" onclick="toggleFundBatches('${fundExpandId}','${chevFundId}')">
+    html += `<div class="fund-card" onclick="showFundDetail('${code}')">
+      <div class="fund-header">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
             <span class="fund-name-text">${fund.fundName || '未命名'}</span>${codeTag}
           </div>
           <div class="fund-meta-row">${activeBatches} 笔 · 投入 ${fmtMoney(totalPrincipal)} · 净值 ${navStr}</div>
+          ${bestEstStr ? `<div style="margin-top:3px;"><span class="estimate ${bestEstClass}">估${bestEstStr} 参考</span></div>` : ''}
         </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
           <span class="${bestRateClass}" style="font-size:20px;font-weight:700;">${bestRateStr}</span>
-          <svg class="chevron" id="${chevFundId}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:20px;height:20px;color:var(--text3)">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+          <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--text3);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
           </svg>
         </div>
       </div>
-      <div id="${fundExpandId}" class="fund-batches-container" style="display:none;">`;
-
-    for (const { batch, cost, currentShares, holdDays, feeRate, realRate, estimateRate } of batchDataList) {
-      const batchId = batch.id;
-      const collapseId = 'collapse_' + batchId;
-      const realRateStr = realRate !== null ? fmtPct(realRate) : '—';
-      const estRateStr = estimateRate !== null ? fmtPct(estimateRate) : null;
-      const realClass = realRate !== null ? (realRate > 0 ? 'profit' : realRate < 0 ? 'loss' : 'neutral') : 'neutral';
-      const estClass = estimateRate !== null ? (estimateRate > 0 ? 'profit' : estimateRate < 0 ? 'loss' : 'neutral') : 'neutral';
-      const gszStr = cache ? fmt4(cache.gsz) : '—';
-      const navTime = cache ? (cache.jzrq || '—') : '—';
-
-      let estimatedAmount = null;
-      if (cache && cache.dwjz && currentShares > 0) {
-        const gross = currentShares * parseFloat(cache.dwjz);
-        estimatedAmount = gross * (1 - feeRate / 100);
-      }
-
-      html += `<div class="batch-row-wrapper">
-        <div class="batch-row" onclick="toggleCollapse('${collapseId}')">
-          <div style="flex:1;min-width:0;">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-              <span style="font-size:13px;font-weight:600;">${batch.buyDate}</span>
-              ${badgeHTML(batch.status)}
-            </div>
-            ${estRateStr ? `<div style="margin-top:2px;"><span class="estimate ${estClass}">估${estRateStr} 参考</span></div>` : ''}
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0;">
-            <span class="${realClass}" style="font-size:20px;font-weight:700;">${realRateStr}</span>
-            <svg class="chevron" id="chev_${collapseId}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;color:var(--text3)">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
-            </svg>
-          </div>
-        </div>
-        <div class="collapse-body" id="${collapseId}" style="display:none;">
-          <div class="batch-detail">
-            <div class="data-row"><span class="data-key">有效成本价</span><span class="data-val">${fmt4(cost)}</span></div>
-            <div class="data-row"><span class="data-key">昨日真实净值</span><span class="data-val">${navStr} <small style="color:var(--text3);font-weight:400;">(${navTime})</small></span></div>
-            ${cache && cache.gsz ? `<div class="data-row"><span class="data-key">盘中估值</span><span class="data-val estimate">${gszStr} <small>(仅供参考)</small></span></div>` : ''}
-            <div class="data-row"><span class="data-key">当前份额</span><span class="data-val">${r4(currentShares).toLocaleString()}</span></div>
-            <div class="data-row"><span class="data-key">本金</span><span class="data-val">${fmtMoney(batch.principal)}</span></div>
-            <div class="data-row"><span class="data-key">持有天数</span><span class="data-val">${holdDays} 天（费率 ${feeRate}%）</span></div>
-            ${estimatedAmount ? `<div class="data-row"><span class="data-key">预估到账（扣费后）</span><span class="data-val profit">${fmtMoney(estimatedAmount)}</span></div>` : ''}
-            ${batch.dividendReinvestments && batch.dividendReinvestments.length > 0 ? dividendHTML(batch.dividendReinvestments) : ''}
-            ${batch.redemptionHistory && batch.redemptionHistory.length > 0 ? redeemHistoryMiniHTML(batch.redemptionHistory) : ''}
-            <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap;">
-              <button class="btn btn-ghost btn-sm" onclick="openDividendSheet('${code}','${batchId}')">红利再投</button>
-              <button class="btn btn-success btn-sm" onclick="openRedeemSheet('${code}','${batchId}')">赎回</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteBatch('${code}','${batchId}')">删除</button>
-            </div>
-          </div>
-        </div>
-      </div>`;
-    }
-
-    html += `</div></div>`;
+    </div>`;
   }
 
   list.innerHTML = html;
@@ -1026,12 +995,158 @@ function toggleCollapse(id) {
   chev.classList.toggle('open', !isOpen);
 }
 
-function toggleFundBatches(batchesId, chevId) {
-  const el = document.getElementById(batchesId);
-  const chev = document.getElementById(chevId);
-  const isOpen = el.style.display !== 'none';
-  el.style.display = isOpen ? 'none' : 'block';
-  chev.classList.toggle('open', !isOpen);
+// ════════════════════════════════════════════════════════════
+// 基金详情页导航
+// ════════════════════════════════════════════════════════════
+let _currentDetailCode = null;
+
+function afterSave() {
+  if (_currentDetailCode && db.funds[_currentDetailCode]) {
+    renderFundDetail(_currentDetailCode);
+  } else {
+    _currentDetailCode = null;
+    renderHoldings();
+  }
+}
+
+function showFundDetail(code) {
+  _currentDetailCode = code;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-fund-detail').classList.add('active');
+  renderFundDetail(code);
+}
+
+function hideFundDetail() {
+  _currentDetailCode = null;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-holdings').classList.add('active');
+  renderHoldings();
+}
+
+function renderFundDetail(code) {
+  const fund = db.funds[code];
+  if (!fund) { hideFundDetail(); return; }
+
+  const cache = db.navCache[code];
+  const rules = db.settings.stopProfitRules;
+  const market = getMarketStatus();
+  const batches = (fund.batches || []).filter(b => b.status !== 'fully_sold' && b.status !== 'confirmed_sold');
+
+  const navStr = cache ? fmt4(cache.dwjz) : '—';
+  const navDate = cache ? (cache.jzrq || '') : '';
+  const fundName = fund.fundName || code;
+  const codeStr = /^\d{6}$/.test(code) ? code : (fund.fundCode || '');
+  const totalPrincipal = batches.reduce((s, b) => s + b.principal, 0);
+
+  let batchesHtml = '';
+  let batchNum = 0;
+
+  for (const batch of batches) {
+    batchNum++;
+    const cost = calcBatchEffectiveCost(batch);
+    const currentShares = calcBatchCurrentShares(batch);
+    const holdDays = calcHoldDays(batch.buyDate);
+    const feeRate = calcFeeRate(holdDays);
+
+    let realRate = null, estimateRate = null;
+    if (cache) {
+      if (cache.dwjz) realRate = calcProfitRate(parseFloat(cache.dwjz), cost);
+      if (cache.gsz && market.isTrading) estimateRate = calcProfitRate(parseFloat(cache.gsz), cost);
+    }
+
+    const realClass = realRate !== null ? (realRate > 0 ? 'profit' : realRate < 0 ? 'loss' : 'neutral') : 'neutral';
+    const estClass = estimateRate !== null ? (estimateRate > 0 ? 'profit' : estimateRate < 0 ? 'loss' : 'neutral') : 'neutral';
+
+    let estimatedAmount = null;
+    if (cache && cache.dwjz && currentShares > 0) {
+      estimatedAmount = r2(currentShares * parseFloat(cache.dwjz) * (1 - feeRate / 100));
+    }
+
+    // 止盈达标净值
+    let targetNavHtml = '';
+    if (rules.length > 0) {
+      const sorted = [...rules].sort((a, b) => a.threshold - b.threshold);
+      targetNavHtml = '<div class="target-nav-section"><div class="target-nav-title">止盈参考净值</div>';
+      const currentNavNum = cache && cache.dwjz ? parseFloat(cache.dwjz) : null;
+      for (const rule of sorted) {
+        const ruleIdx = rules.indexOf(rule);
+        const targetNav = r4(cost * (1 + rule.threshold / 100));
+        const isTriggered = (batch.triggeredRules || []).includes(ruleIdx);
+        let statusStr = '';
+        if (currentNavNum != null) {
+          if (currentNavNum >= targetNav) {
+            statusStr = `<span style="color:var(--green);font-size:11px;font-weight:600;">✓ 已达标</span>`;
+          } else {
+            const gapPct = r4((targetNav - currentNavNum) / currentNavNum * 100);
+            statusStr = `<span style="color:var(--text3);font-size:11px;">差 ${gapPct}%</span>`;
+          }
+        }
+        targetNavHtml += `<div class="target-nav-row${isTriggered ? ' triggered' : ''}">
+          <div class="target-nav-label">${rule.label}（${rule.threshold}%）</div>
+          <div class="target-nav-val">${fmt4(targetNav)}</div>
+          ${statusStr}
+        </div>`;
+      }
+      targetNavHtml += '</div>';
+    }
+
+    const divHtml = batch.dividendReinvestments && batch.dividendReinvestments.length > 0 ? dividendHTML(batch.dividendReinvestments) : '';
+    const redeemHtml = batch.redemptionHistory && batch.redemptionHistory.length > 0 ? redeemHistoryMiniHTML(batch.redemptionHistory) : '';
+
+    batchesHtml += `<div class="batch-card">
+      <div class="batch-card-header">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span class="batch-num">第${batchNum}笔</span>
+          <span style="font-size:12px;color:var(--text2);">${batch.buyDate}</span>
+          ${badgeHTML(batch.status)}
+        </div>
+        <div style="text-align:right;margin-left:8px;">
+          <div class="${realClass}" style="font-size:22px;font-weight:700;">${realRate !== null ? fmtPct(realRate) : '—'}</div>
+          ${estimateRate !== null ? `<div class="estimate ${estClass}">估${fmtPct(estimateRate)} 参考</div>` : ''}
+        </div>
+      </div>
+      <div class="batch-card-body">
+        <div class="batch-info-grid">
+          <div><div class="batch-info-key">有效成本价</div><div class="batch-info-val">${fmt4(cost)}</div></div>
+          <div><div class="batch-info-key">当前份额</div><div class="batch-info-val">${r4(currentShares).toLocaleString()}</div></div>
+          <div><div class="batch-info-key">投入本金</div><div class="batch-info-val">${fmtMoney(batch.principal)}</div></div>
+          <div><div class="batch-info-key">持有 ${holdDays} 天</div><div class="batch-info-val" style="color:var(--orange)">费率 ${feeRate}%</div></div>
+          ${estimatedAmount != null ? `<div style="grid-column:1/-1;"><div class="batch-info-key">预估到账（扣费后）</div><div class="batch-info-val profit">${fmtMoney(estimatedAmount)}</div></div>` : ''}
+        </div>
+        ${targetNavHtml}
+        ${divHtml}
+        ${redeemHtml}
+        <div class="batch-actions">
+          <button class="btn btn-ghost btn-sm" onclick="openDividendSheet('${code}','${batch.id}')">红利再投</button>
+          <button class="btn btn-success btn-sm" onclick="openRedeemSheet('${code}','${batch.id}')">赎回</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteBatch('${code}','${batch.id}')">删除</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if (batchNum === 0) {
+    batchesHtml = `<div class="empty-state"><p>该基金暂无活跃持仓</p><small>已清仓批次不在此显示</small></div>`;
+  }
+
+  const navInfo = navStr !== '—' ? `净值 ${navStr}${navDate ? ' · ' + navDate : ''}` : '暂无净值';
+
+  document.getElementById('fund-detail-content').innerHTML = `
+    <div class="detail-header">
+      <button class="detail-back-btn" onclick="hideFundDetail()">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="width:18px;height:18px;">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+        </svg>
+      </button>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${fundName}</div>
+        <div style="font-size:11px;color:var(--text3);">${codeStr ? codeStr + ' · ' : ''}${batches.length} 笔 · 投入 ${fmtMoney(totalPrincipal)}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;">
+        <div style="font-size:12px;color:var(--text2);">${navInfo}</div>
+      </div>
+    </div>
+    ${batchesHtml}`;
 }
 
 function updateAlertBanners(triggers) {
@@ -1317,7 +1432,7 @@ function submitDividend(code, batchId) {
   batch.dividendReinvestments.push({ date, nav, shares, amount });
   saveDB();
   closeSheet();
-  renderHoldings();
+  afterSave();
   showToast('红利再投已录入');
 }
 
@@ -1512,7 +1627,7 @@ function submitRedeem(code, batchId) {
   updateBatchStatus(batch);
   saveDB();
   closeSheet();
-  renderHoldings();
+  afterSave();
   showToast('赎回记录已生成，等待净值确认');
 }
 
@@ -1526,7 +1641,7 @@ function deleteBatch(code, batchId) {
     fund.batches = fund.batches.filter(b => b.id !== batchId);
     if (fund.batches.length === 0) delete db.funds[code];
     saveDB();
-    renderHoldings();
+    afterSave();
     showToast('批次已删除');
   });
 }
@@ -1564,7 +1679,7 @@ async function refreshAll() {
 
   refreshing = false;
   btn.classList.remove('spinning');
-  renderHoldings();
+  afterSave();
 }
 
 function recordSnapshots() {
@@ -1877,6 +1992,7 @@ function importData() {
         confirm('导入数据将覆盖当前所有数据，确定继续吗？', function() {
           db = migrateDB(parsed);
           saveDB();
+          _currentDetailCode = null;
           renderHoldings();
           renderSettings();
           showToast('数据导入成功');
@@ -1903,6 +2019,7 @@ function clearAllData() {
   confirm('⚠ 此操作将清除所有数据（持仓、赎回记录、设置），不可恢复！确定继续吗？', function() {
     db = JSON.parse(JSON.stringify(DEFAULT_DATA));
     saveDB();
+    _currentDetailCode = null;
     renderHoldings();
     renderSettings();
     showToast('所有数据已清空');
