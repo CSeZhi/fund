@@ -1295,12 +1295,17 @@ function openAddBatchSheet(prefill = {}) {
         <button class="btn btn-ghost" style="flex:1" onclick="triggerPasteText()">📋 粘贴文字</button>
       </div>
       <input type="file" id="scan-input" accept="image/*" style="display:none" onchange="handleScanFile(this)">
-      <div id="scan-status" style="display:none;margin-top:8px;padding:8px 12px;border-radius:var(--radius-sm);background:var(--bg3);font-size:12px;text-align:center;"></div>
-      <div id="img-preview-wrap" style="display:none;margin-top:8px;position:relative;">
-        <img id="img-preview" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;">
-        <button onclick="clearImgPreview()" style="position:absolute;top:6px;right:6px;background:rgba(0,0,0,.6);border:none;color:#fff;border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;line-height:24px;text-align:center;">×</button>
-        <div style="margin-top:6px;font-size:11px;color:var(--text3);text-align:center;">对照图片填写下方字段</div>
-        <button id="ocr-try-btn" class="btn btn-ghost btn-full" style="margin-top:6px;font-size:12px;" onclick="tryAutoOCR()">✨ 尝试自动识别</button>
+      <div id="img-preview-wrap" style="display:none;margin-top:8px;">
+        <div style="display:flex;gap:10px;align-items:flex-start;">
+          <div style="position:relative;flex-shrink:0;width:44%;max-width:160px;">
+            <img id="img-preview" style="max-height:220px;width:100%;object-fit:contain;border-radius:var(--radius-sm);border:1px solid var(--border);display:block;background:var(--bg3);">
+            <button onclick="clearImgPreview()" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.65);border:none;color:#fff;border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;line-height:22px;text-align:center;">×</button>
+          </div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;">
+            <div id="scan-status" style="display:none;padding:8px;border-radius:var(--radius-sm);background:var(--bg3);font-size:12px;"></div>
+            <button id="ocr-try-btn" class="btn btn-ghost btn-full" style="font-size:12px;" onclick="tryAutoOCR()">✨ 尝试自动识别</button>
+          </div>
+        </div>
       </div>
       <div id="paste-area" style="display:none;margin-top:8px;">
         <textarea id="paste-input" class="form-input" rows="5" placeholder="将天天基金确认页面的文字粘贴到这里，然后点识别" style="resize:none;font-size:12px;"></textarea>
@@ -2287,33 +2292,46 @@ function applyOCRResult(result, statusEl, rawText) {
   fillFromOCR(result);
   statusEl.style.display = 'block';
   const debugHtml = rawText
-    ? `<details style="margin-top:8px;"><summary style="font-size:10px;color:var(--text3);cursor:pointer;">查看原始识别文字</summary>
-        <pre style="font-size:10px;color:var(--text3);white-space:pre-wrap;margin-top:4px;background:var(--bg3);padding:6px;border-radius:4px;max-height:120px;overflow-y:auto;">${rawText.replace(/</g,'&lt;')}</pre>
+    ? `<details style="margin-top:6px;"><summary style="font-size:10px;color:var(--text3);cursor:pointer;">查看原始识别文字</summary>
+        <pre style="font-size:10px;color:var(--text3);white-space:pre-wrap;margin-top:4px;background:var(--bg3);padding:6px;border-radius:4px;max-height:100px;overflow-y:auto;">${rawText.replace(/</g,'&lt;')}</pre>
        </details>` : '';
   if (result.found) {
-    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--green);">✅ 已识别：${result.name || '未知基金'}</div><div style="font-size:11px;color:var(--text3);margin-top:2px;">请核对下方字段</div>${debugHtml}`;
+    const fields = [
+      result.name      && `<div><span style="color:var(--text3)">名称</span> ${result.name.slice(0,12)}${result.name.length>12?'…':''}</div>`,
+      result.principal && `<div><span style="color:var(--text3)">金额</span> ${result.principal}</div>`,
+      result.shares    && `<div><span style="color:var(--text3)">份额</span> ${result.shares}</div>`,
+      result.nav       && `<div><span style="color:var(--text3)">净值</span> ${result.nav}</div>`,
+      result.date      && `<div><span style="color:var(--text3)">日期</span> ${result.date}</div>`,
+    ].filter(Boolean).join('');
+    statusEl.innerHTML = `<div style="font-size:11px;font-weight:600;color:var(--green);margin-bottom:5px;">✅ 已识别</div>
+      <div style="font-size:11px;line-height:1.8;">${fields}</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:4px;">已填入下方字段，请核对</div>${debugHtml}`;
   } else {
-    statusEl.innerHTML = `<div style="font-size:12px;font-weight:600;color:var(--orange);">⚠ 识别不完整，请对照图片补全</div>${debugHtml}`;
+    statusEl.innerHTML = `<div style="font-size:11px;font-weight:600;color:var(--orange);">⚠ 识别不完整</div>
+      <div style="font-size:10px;color:var(--text3);margin-top:2px;">请对照图片补全</div>${debugHtml}`;
   }
 }
 
-function parseOCRText(text) {
+function parseOCRText(rawText) {
+  // 先抹掉汉字之间的空格（OCR 常见多余空格），重复三次处理连续情况
+  let text = rawText;
+  for (let i = 0; i < 3; i++) {
+    text = text.replace(/([一-龥])\s+([一-龥])/g, '$1$2');
+  }
   const result = { found: false };
-  // 允许汉字之间有空格（OCR 常见问题）
-  const f = s => s.split('').join('\\s*');
 
   // 基金名称
-  const nameMatch = text.match(new RegExp(f('买入产品') + '\\s*([^\\n\\r>›»<]{2,})'));
+  const nameMatch = text.match(/买入产品\s*([^\n\r>›»<]{2,})/);
   if (nameMatch) {
     result.name = nameMatch[1].trim().replace(/\s*[>›»]+\s*$/, '').trim();
     if (result.name) result.found = true;
   }
 
   // 确认金额（优先）> 买入金额 > 顶部大金额
-  const confirmAmt = text.match(new RegExp(f('确认金额') + '\\s*([\\d,]+\\.?\\d*)'));
-  const buyAmt     = text.match(new RegExp(f('买入金额') + '\\s*([\\d,]+\\.?\\d*)'));
-  const topAmt     = text.match(/([\d,]+\.\d{2})\s*元[\s\S]{0,30}买\s*入\s*成\s*功/);
-  const topAmt2    = text.match(/买\s*入\s*成\s*功[\s\S]{0,30}?([\d,]+\.\d{2})\s*元/);
+  const confirmAmt = text.match(/确认金额\s*([\d,]+\.?\d*)/);
+  const buyAmt     = text.match(/买入金额\s*([\d,]+\.?\d*)/);
+  const topAmt     = text.match(/([\d,]+\.\d{2})\s*元[\s\S]{0,30}买入成功/);
+  const topAmt2    = text.match(/买入成功[\s\S]{0,30}?([\d,]+\.\d{2})\s*元/);
   if (confirmAmt) {
     result.principal = parseFloat(confirmAmt[1].replace(/,/g, ''));
     result.found = true;
@@ -2326,7 +2344,7 @@ function parseOCRText(text) {
   }
 
   // 确认份额；兜底：数字后跟"份"
-  const sharesMatch = text.match(new RegExp(f('确认份额') + '\\s*([\\d,]+\\.?\\d*)'));
+  const sharesMatch = text.match(/确认份额\s*([\d,]+\.?\d*)/);
   if (sharesMatch) {
     result.shares = parseFloat(sharesMatch[1].replace(/,/g, ''));
     result.found = true;
@@ -2336,21 +2354,14 @@ function parseOCRText(text) {
   }
 
   // 确认净值
-  const navMatch = text.match(new RegExp(f('确认净值') + '\\s*([\\d.]+)'));
-  if (navMatch) {
-    result.nav = parseFloat(navMatch[1]);
-    result.found = true;
-  }
+  const navMatch = text.match(/确认净值\s*([\d.]+)/);
+  if (navMatch) { result.nav = parseFloat(navMatch[1]); result.found = true; }
 
   // 日期：确认时间 > 买入时间
-  const confirmDate = text.match(new RegExp(f('确认时间') + '\\s*(\\d{4}-\\d{2}-\\d{2})'));
-  const buyDate     = text.match(new RegExp(f('买入时间') + '\\s*(\\d{4}-\\d{2}-\\d{2})'));
-  if (confirmDate) {
-    result.date = confirmDate[1];
-    result.found = true;
-  } else if (buyDate) {
-    result.date = buyDate[1];
-  }
+  const confirmDate = text.match(/确认时间\s*(\d{4}-\d{2}-\d{2})/);
+  const buyDate     = text.match(/买入时间\s*(\d{4}-\d{2}-\d{2})/);
+  if (confirmDate) { result.date = confirmDate[1]; result.found = true; }
+  else if (buyDate) { result.date = buyDate[1]; }
 
   return result;
 }
