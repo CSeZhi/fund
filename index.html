@@ -795,19 +795,24 @@ async function autoFillFundName(code) {
   if (name && !nameEl.value) nameEl.value = name;
 }
 
-async function fetchNavWithCache(code) {
-  const cache = db.navCache[code];
+async function fetchNavWithCache(fundKey) {
+  const fund = db.funds[fundKey];
+  // 优先用基金对象里的 fundCode，其次看 key 本身是否是 6 位数字
+  const apiCode = (fund?.fundCode && /^\d{6}$/.test(fund.fundCode))
+    ? fund.fundCode
+    : /^\d{6}$/.test(fundKey) ? fundKey : null;
+
+  if (!apiCode) return db.navCache[fundKey] || null; // 没有有效代码，跳过
+
+  const cache = db.navCache[fundKey];
   const market = getMarketStatus();
   const now = Date.now();
 
-  // 交易时间内 1 分钟缓存，否则 5 分钟
   const ttl = market.isTrading ? 60000 : 300000;
-  if (cache && (now - (cache.fetchedAt || 0)) < ttl) {
-    return cache;
-  }
+  if (cache && (now - (cache.fetchedAt || 0)) < ttl) return cache;
 
   try {
-    const data = await fetchNav(code);
+    const data = await fetchNav(apiCode);
     const nav = {
       dwjz: data.dwjz,
       gsz: data.gsz,
@@ -816,7 +821,7 @@ async function fetchNavWithCache(code) {
       fetchedAt: now,
       source: 'api'
     };
-    db.navCache[code] = nav;
+    db.navCache[fundKey] = nav;
     saveDB();
     return nav;
   } catch(e) {
@@ -2578,11 +2583,13 @@ function parseOCRText(rawText) {
   }
   const result = { found: false };
 
-  // 基金名称（匹配到下一字段标签为止，>箭头从结果里删而非作为停止符）
-  const nameMatch = text.match(/买入产品\s*([\s\S]+?)(?=\s*(?:买入金额|买入时间|付款方式|确认信息|买入信息))/);
-  if (nameMatch) {
-    result.name = nameMatch[1].replace(/[>›»<]/g, '').replace(/\s+/g, '').trim();
-    if (result.name) result.found = true;
+  // 基金名称：取「买入产品」到下一字段标签之间的所有文字，
+  // 按段落长度降序拼接（解决 OCR 列读序导致"接C"排在长名前面的问题）
+  const nameBlock = text.match(/买入产品\s*([\s\S]*?)\s*(?:买入金额|买入时间|付款方式|确认信息|买入信息)/)?.[1];
+  if (nameBlock) {
+    const segments = nameBlock.replace(/[>›»<]/g, '').split(/\s+/).filter(s => s.trim());
+    const name = segments.sort((a, b) => b.length - a.length).join('');
+    if (name) { result.name = name; result.found = true; }
   }
 
   // 确认金额（优先）> 买入金额 > 顶部大金额
