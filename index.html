@@ -2233,19 +2233,7 @@ async function tryAutoOCR() {
     }
 
     if (!window.Tesseract) {
-      const installed = await checkOCRPackInstalled();
-      if (!installed) {
-        statusEl.style.display = 'block';
-        statusEl.innerHTML = `
-          <div style="font-size:12px;font-weight:600;color:var(--orange);">需要先安装 OCR 语言包</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.6;">
-            约 10 MB，安装一次保存本机，之后识别无需联网。
-          </div>
-          <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="switchToSettingsOCR()">前往设置安装</button>`;
-        btn.disabled = false;
-        return;
-      }
-      setProgress('⚡', '加载识别引擎…', 0, '从本地缓存加载', true);
+      setProgress('⏳', '加载识别引擎…', 0, '首次使用需下载引擎约 6MB，之后自动缓存', true);
       scheduleStuckCheck();
       await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
     }
@@ -2253,9 +2241,10 @@ async function tryAutoOCR() {
     if (cancelled) return;
     setProgress('⏳', '准备中…', 0, '', true);
 
-    const worker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
+    const worker = await Tesseract.createWorker('chi_sim+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+      langPath: './tessdata',
       logger: m => {
         if (cancelled) return;
         const pct = Math.round((m.progress || 0) * 100);
@@ -2441,23 +2430,14 @@ function checkOCRPackInstalled() {
 async function renderOCRPackStatus() {
   const area = document.getElementById('ocr-pack-status-area');
   if (!area) return;
-  const installed = checkOCRPackInstalled();
-  if (installed) {
-    area.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div>
-          <div style="font-size:13px;font-weight:600;color:var(--green);">✓ 已安装</div>
-          <div style="font-size:11px;color:var(--text2);margin-top:2px;">OCR 识别无需联网</div>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="uninstallOCRPack()" style="color:var(--red);border-color:rgba(248,113,113,.4);">删除</button>
-      </div>`;
-  } else {
-    area.innerHTML = `
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6;">
-        图片自动识别所需语言包，约 10 MB。<br>安装一次保存本机，之后 OCR 无需联网。
+  area.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:18px;">📦</span>
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--green);">✓ 语言数据已内置</div>
+        <div style="font-size:11px;color:var(--text2);margin-top:2px;">首次使用 OCR 时自动下载引擎约 6MB，之后离线可用</div>
       </div>
-      <button class="btn btn-primary btn-full" onclick="downloadOCRPack()">⬇ 安装 OCR 语言包</button>`;
-  }
+    </div>`;
 }
 
 async function downloadOCRPack() {
@@ -2502,7 +2482,7 @@ async function downloadOCRPack() {
     }
     if (_ocrPackDownloadCancel) { clearInterval(stuckTimer); renderOCRPackStatus(); return; }
 
-    _ocrPackWorker = await Tesseract.createWorker('chi_sim_fast+eng', 1, {
+    _ocrPackWorker = await Tesseract.createWorker('chi_sim+eng', 1, {
       workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
       corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
       logger: m => {
