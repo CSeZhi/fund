@@ -1357,10 +1357,11 @@ function openAddBatchSheet(prefill = {}) {
   openSheet(
     prefill.name ? `新增买入 · ${prefill.name}` : '新增买入',
     `<div style="margin-bottom:16px;">
-      <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <div style="display:flex;gap:8px;margin-bottom:6px;">
         <button class="btn btn-ghost" style="flex:1" onclick="triggerScanImage()" id="scan-btn">📷 导入截图</button>
         <button class="btn btn-ghost" style="flex:1" onclick="triggerPasteText()">📋 粘贴文字</button>
       </div>
+      <button class="btn btn-ghost btn-full" style="margin-bottom:8px;font-size:12px;" onclick="triggerBatchScan()">🗂 批量导入多张截图</button>
       <input type="file" id="scan-input" accept="image/*" style="display:none" onchange="handleScanFile(this)">
       <div id="img-preview-wrap" style="display:none;margin-top:8px;">
         <div id="scan-file-label" style="font-size:11px;color:var(--text3);margin-bottom:6px;text-align:center;"></div>
@@ -2192,6 +2193,143 @@ function scheduleAutoRefresh() {
 function triggerScanImage() {
   document.getElementById('scan-input').click();
 }
+
+// ════════════════════════════════════════════════════════════
+// 批量导入
+// ════════════════════════════════════════════════════════════
+let _batchItems = [];
+
+function triggerBatchScan() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*'; inp.multiple = true; inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.onchange = async () => {
+    const files = Array.from(inp.files || []);
+    inp.remove();
+    if (!files.length) return;
+    await startBatchImport(files);
+  };
+  inp.click();
+}
+
+async function startBatchImport(files) {
+  _batchItems = [];
+  openSheet(`批量识别 (${files.length} 张)`,
+    `<div id="batch-status" style="padding:20px;text-align:center;">
+       <div style="font-size:13px;font-weight:600;">准备中…</div>
+     </div>`, '');
+
+  const getStatus = () => document.getElementById('batch-status');
+
+  if (!window.Tesseract) {
+    if (getStatus()) getStatus().innerHTML = '<div style="font-size:13px;">加载识别引擎…</div>';
+    try { await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'); }
+    catch(e) { if (getStatus()) getStatus().innerHTML = `<div style="color:var(--red);">加载失败</div>`; return; }
+  }
+
+  let worker;
+  try {
+    if (getStatus()) getStatus().innerHTML = '<div style="font-size:13px;">初始化引擎…</div>';
+    worker = await Tesseract.createWorker('chi_sim+eng', 1, {
+      workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+      corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5/tesseract-core-simd-lstm.wasm.js',
+      langPath: './tessdata',
+    });
+  } catch(e) { if (getStatus()) getStatus().innerHTML = `<div style="color:var(--red);">引擎启动失败</div>`; return; }
+
+  for (let i = 0; i < files.length; i++) {
+    if (!getStatus()) { worker.terminate(); return; }
+    const pct = Math.round(i / files.length * 100);
+    getStatus().innerHTML = `
+      <div style="font-size:13px;font-weight:600;">识别第 ${i + 1} / ${files.length} 张</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${files[i].name}</div>
+      <div style="margin-top:10px;background:var(--border);border-radius:2px;height:4px;overflow:hidden;">
+        <div style="height:100%;background:var(--blue);width:${pct}%;transition:width .3s;"></div>
+      </div>`;
+    try {
+      const { data: { text } } = await worker.recognize(files[i]);
+      const result = parseOCRText(text);
+      _batchItems.push({ status: result.found ? 'ok' : 'partial', data: result, include: result.found });
+    } catch {
+      _batchItems.push({ status: 'error', data: {}, include: false });
+    }
+  }
+
+  await worker.terminate();
+  renderBatchReview();
+}
+
+function renderBatchReview() {
+  const okCount = _batchItems.filter(it => it.include).length;
+  const rows = _batchItems.map((item, i) => {
+    const d = item.data;
+    const icon = item.status === 'ok' ? '✅' : item.status === 'partial' ? '⚠️' : '❌';
+    const miss = [!d.date && '日期', !d.nav && '净值', !d.principal && '本金', !d.shares && '份额'].filter(Boolean);
+    return `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);">
+        <input type="checkbox" ${item.include ? 'checked' : ''} ${item.status === 'error' ? 'disabled' : ''}
+          onchange="_batchItems[${i}].include=this.checked;_updateBatchFooter()"
+          style="width:18px;height:18px;accent-color:var(--blue);flex-shrink:0;margin-top:2px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;font-weight:600;">${icon} ${d.name || '未识别名称'}</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:3px;line-height:1.6;">
+            ${d.date || '—'} &nbsp;净值&nbsp;${d.nav || '—'}<br>
+            本金&nbsp;${d.principal || '—'} &nbsp;份额&nbsp;${d.shares || '—'}
+          </div>
+          ${miss.length ? `<div style="font-size:10px;color:var(--orange);">缺少：${miss.join('、')}</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  document.getElementById('sheet-body').innerHTML = `
+    <div style="font-size:12px;color:var(--text3);margin-bottom:6px;">
+      共 ${_batchItems.length} 张，已勾选 <span id="batch-sel-count">${okCount}</span> 条
+    </div>${rows}`;
+
+  document.getElementById('sheet-footer').innerHTML = `
+    <button class="btn btn-ghost" style="flex:1" onclick="closeSheet()">取消</button>
+    <button class="btn btn-primary" style="flex:2" id="batch-confirm-btn"
+      onclick="saveBatchImport()" ${okCount === 0 ? 'disabled' : ''}>导入 ${okCount} 条</button>`;
+}
+
+function _updateBatchFooter() {
+  const n = _batchItems.filter(it => it.include).length;
+  const c = document.getElementById('batch-sel-count');
+  const b = document.getElementById('batch-confirm-btn');
+  if (c) c.textContent = n;
+  if (b) { b.textContent = `导入 ${n} 条`; b.disabled = n === 0; }
+}
+
+function saveBatchImport() {
+  let saved = 0;
+  for (const item of _batchItems) {
+    if (!item.include) continue;
+    const d = item.data;
+    if (!d.date || !d.nav || !d.principal || !d.shares) continue;
+    const name = d.name || '';
+    const fundKey = name ? name.slice(0, 10) : 'fund_' + Date.now();
+    if (!db.funds[fundKey]) {
+      db.funds[fundKey] = { fundCode: '', fundName: name, batches: [], hasDividend: false };
+    } else if (name) {
+      db.funds[fundKey].fundName = name;
+    }
+    db.funds[fundKey].batches.push({
+      id: 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      buyDate: d.date,
+      confirmNav: parseFloat(d.nav),
+      principal: parseFloat(d.principal),
+      shares: parseFloat(d.shares),
+      status: 'holding',
+      triggeredRules: [],
+      dividendReinvestments: [],
+      redemptionHistory: []
+    });
+    saved++;
+  }
+  saveDB(); closeSheet(); afterSave();
+  showToast(`已导入 ${saved} 条买入记录`);
+}
+
 
 function triggerPasteText() {
   const area = document.getElementById('paste-area');
